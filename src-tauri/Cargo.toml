@@ -1,0 +1,51 @@
+[package]
+name = "wakascribe"
+version = "0.1.0"
+description = "Offline speech-to-text application using Parakeet"
+authors = ["you"]
+edition = "2021"
+
+[lib]
+name = "wakascribe_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = ["macos-private-api"] }
+tauri-plugin-opener = "2"
+tauri-plugin-dialog = "2"
+tauri-plugin-fs = "2"
+tauri-plugin-global-shortcut = "2"
+tauri-plugin-clipboard-manager = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["full"] }
+cpal = "0.15"
+rusqlite = { version = "0.31", features = ["bundled"] }
+uuid = { version = "1", features = ["v4"] }
+chrono = { version = "0.4", features = ["serde"] }
+thiserror = "1"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+parking_lot = "0.12"
+once_cell = "1"
+
+# Audio processing
+hound = "3.5"          # WAV file reading/writing
+rubato = "0.15"        # Resampling
+
+# Export
+docx-rs = "0.4"
+
+# OpenVINO for ONNX model inference (runtime-linking for homebrew install)
+openvino = { version = "0.8", features = ["runtime-linking"] }
+
+# Mel spectrogram
+rustfft = "6"
+ndarray = "0.16"
+
+[target.'cfg(target_os = "macos")'.dependencies]
+cocoa = "0.26"
+objc = "0.2"

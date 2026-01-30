@@ -1,0 +1,116 @@
+import { useCallback } from "react";
+import { listen } from "@tauri-apps/api/event";
+import { useAppStore } from "../stores/appStore";
+import {
+  listTranscriptions,
+  getTranscription,
+  deleteTranscription as tauriDeleteTranscription,
+  updateTranscriptionText,
+  transcribeFile as tauriTranscribeFile,
+  exportToTxt,
+  exportToDocx,
+  copyToClipboard,
+} from "../lib/tauri";
+import type { Transcription, TranscriptionProgress } from "../lib/types";
+
+export function useTranscription() {
+  const { transcriptions, setTranscriptions, addTranscription } = useAppStore();
+
+  const loadTranscriptions = useCallback(async () => {
+    try {
+      const list = await listTranscriptions();
+      setTranscriptions(list);
+    } catch (error) {
+      console.error("Failed to load transcriptions:", error);
+    }
+  }, [setTranscriptions]);
+
+  const transcribeFile = useCallback(
+    async (
+      filePath: string,
+      onProgress?: (progress: TranscriptionProgress) => void
+    ): Promise<Transcription | null> => {
+      try {
+        // Set up progress listener
+        let unlisten: (() => void) | null = null;
+        if (onProgress) {
+          unlisten = await listen<TranscriptionProgress>(
+            "transcription-progress",
+            (event) => {
+              onProgress(event.payload);
+            }
+          );
+        }
+
+        const transcription = await tauriTranscribeFile(filePath);
+        addTranscription(transcription);
+
+        if (unlisten) {
+          unlisten();
+        }
+
+        return transcription;
+      } catch (error) {
+        console.error("Failed to transcribe file:", error);
+        return null;
+      }
+    },
+    [addTranscription]
+  );
+
+  const deleteTranscription = useCallback(
+    async (id: string) => {
+      try {
+        await tauriDeleteTranscription(id);
+        setTranscriptions(transcriptions.filter((t) => t.id !== id));
+      } catch (error) {
+        console.error("Failed to delete transcription:", error);
+      }
+    },
+    [transcriptions, setTranscriptions]
+  );
+
+  const updateText = useCallback(async (id: string, editedText: string) => {
+    try {
+      await updateTranscriptionText(id, editedText);
+    } catch (error) {
+      console.error("Failed to update transcription:", error);
+    }
+  }, []);
+
+  const exportTxt = useCallback(async (id: string, path: string) => {
+    try {
+      await exportToTxt(id, path);
+    } catch (error) {
+      console.error("Failed to export to txt:", error);
+    }
+  }, []);
+
+  const exportDocx = useCallback(async (id: string, path: string) => {
+    try {
+      await exportToDocx(id, path);
+    } catch (error) {
+      console.error("Failed to export to docx:", error);
+    }
+  }, []);
+
+  const copyText = useCallback(async (text: string) => {
+    try {
+      await copyToClipboard(text);
+    } catch (error) {
+      console.error("Failed to copy to clipboard:", error);
+    }
+  }, []);
+
+  return {
+    transcriptions,
+    loadTranscriptions,
+    getTranscription,
+    transcribeFile,
+    deleteTranscription,
+    updateText,
+    exportTxt,
+    exportDocx,
+    copyText,
+  };
+}
