@@ -4,6 +4,7 @@ import type {
   Transcription,
   Settings,
   TranscriptionProgress,
+  TranscriptionLanguage,
 } from "./types";
 
 // Audio commands
@@ -17,6 +18,10 @@ export async function startRecording(deviceId?: string): Promise<void> {
 
 export async function stopRecording(): Promise<Transcription> {
   return invoke("stop_recording");
+}
+
+export async function stopRecordingToWav(): Promise<string> {
+  return invoke("stop_recording_to_wav");
 }
 
 export async function pauseRecording(): Promise<void> {
@@ -34,10 +39,11 @@ export async function getAudioLevel(): Promise<number> {
 // File transcription commands
 export async function transcribeFile(
   filePath: string,
+  language?: TranscriptionLanguage,
   _onProgress?: (progress: TranscriptionProgress) => void
 ): Promise<Transcription> {
   // Progress updates come through Tauri events (handled via listen())
-  return invoke("transcribe_file", { filePath });
+  return invoke("transcribe_file", { filePath, language });
 }
 
 // History commands
@@ -80,4 +86,27 @@ export async function exportToDocx(id: string, path: string): Promise<void> {
 
 export async function copyToClipboard(text: string): Promise<void> {
   return invoke("copy_to_clipboard", { text });
+}
+
+// Test commands - pour désactiver, supprimer ou commenter cette section
+export interface TestTranscriptionResult {
+  text: string;
+  audio_file: string;
+  audio_duration_ms: number;
+  transcription_time_ms: number;
+  realtime_factor: number;
+  diagnostics: {
+    audio_rms: number;
+    audio_samples: number;
+    original_sample_rate: number;
+    tokens_count: number;
+  };
+}
+
+export async function testTranscription(): Promise<TestTranscriptionResult> {
+  return invoke("test_transcription");
+}
+
+export async function checkTestAudio(): Promise<string> {
+  return invoke("check_test_audio");
 }

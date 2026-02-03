@@ -14,13 +14,15 @@ pub struct MelConfig {
 
 impl Default for MelConfig {
     fn default() -> Self {
+        // Parameters matching the OpenVINO mel model
+        // The mel model has filterbank shape [1, 128, 257] where 257 = 512/2 + 1
         Self {
             sample_rate: 16000,
-            n_fft: 512,
-            hop_length: 160, // 10ms at 16kHz
+            n_fft: 512,      // Matches OpenVINO filterbank size (257 bins)
+            hop_length: 160, // 10ms stride at 16kHz
             n_mels: 128,     // Parakeet uses 128 mel features
             fmin: 0.0,
-            fmax: 8000.0,
+            fmax: 8000.0,    // Nyquist for 16kHz
         }
     }
 }
@@ -152,8 +154,33 @@ fn create_mel_filterbank(
     filterbank
 }
 
-/// Normalize mel spectrogram (per-feature normalization)
+/// Normalize mel spectrogram
+/// For Parakeet TDT, we use per-feature (per-mel-bin) normalization
+/// This normalizes each mel bin independently across time
 pub fn normalize_mel(mel_spec: &Array2<f32>) -> Array2<f32> {
+    let (n_mels, n_frames) = mel_spec.dim();
+    let mut normalized = mel_spec.clone();
+
+    // Per-feature normalization: normalize each mel bin independently
+    for m in 0..n_mels {
+        let row = mel_spec.row(m);
+        let mean: f32 = row.iter().sum::<f32>() / n_frames as f32;
+        let variance: f32 = row.iter().map(|x| (x - mean).powi(2)).sum::<f32>() / n_frames as f32;
+        let std = variance.sqrt();
+        let std = if std < 1e-6 { 1.0 } else { std };
+
+        for t in 0..n_frames {
+            normalized[[m, t]] = (normalized[[m, t]] - mean) / std;
+        }
+    }
+
+    normalized
+}
+
+/// Global normalization (alternative method)
+/// Uses global mean and std across all values
+#[allow(dead_code)]
+pub fn normalize_mel_global(mel_spec: &Array2<f32>) -> Array2<f32> {
     let mean = mel_spec.mean().unwrap_or(0.0);
     let std = mel_spec.std(0.0);
     let std = if std < 1e-6 { 1.0 } else { std };

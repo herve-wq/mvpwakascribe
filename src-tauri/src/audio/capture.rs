@@ -2,10 +2,11 @@ use crate::error::{AppError, Result};
 use crate::storage::AudioDevice;
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{SampleFormat, StreamConfig};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::Arc;
 use std::thread::{self, JoinHandle};
+use std::time::Duration;
 use parking_lot::Mutex;
 use tracing::{debug, info, warn};
 
@@ -185,9 +186,32 @@ fn audio_thread(
     let mut current_stream: Option<cpal::Stream> = None;
     let buffer: Arc<Mutex<Vec<f32>>> = Arc::new(Mutex::new(Vec::new()));
 
+    // Generation counter to prevent stale callbacks from writing to buffer
+    // Each new recording increments this counter
+    let recording_generation: Arc<AtomicU64> = Arc::new(AtomicU64::new(0));
+
     loop {
         match command_rx.recv() {
             Ok(AudioCommand::Start { device_id, response }) => {
+                // 1. Increment generation FIRST to invalidate any in-flight callbacks
+                let new_generation = recording_generation.fetch_add(1, Ordering::SeqCst) + 1;
+                info!("Starting recording generation {}", new_generation);
+
+                // 2. Properly stop any existing stream: pause THEN drop
+                if let Some(stream) = current_stream.take() {
+                    is_recording.store(false, Ordering::SeqCst);
+                    if let Err(e) = stream.pause() {
+                        warn!("Failed to pause old stream: {}", e);
+                    }
+                    drop(stream);
+                    std::thread::sleep(Duration::from_millis(50));
+                }
+
+                // 3. Clear buffer BEFORE creating new stream (critical!)
+                buffer.lock().clear();
+                debug!("Buffer cleared for generation {}", new_generation);
+
+                // 4. Create and start stream with current generation
                 let result = start_stream(
                     device_id.as_deref(),
                     Arc::clone(&buffer),
@@ -195,14 +219,17 @@ fn audio_thread(
                     Arc::clone(&is_paused),
                     Arc::clone(&audio_level),
                     Arc::clone(&sample_rate),
+                    Arc::clone(&recording_generation),
+                    new_generation,
                 );
 
                 match result {
                     Ok(stream) => {
-                        buffer.lock().clear();
+                        // 5. Store stream, THEN enable recording flag
                         current_stream = Some(stream);
-                        is_recording.store(true, Ordering::SeqCst);
                         is_paused.store(false, Ordering::SeqCst);
+                        is_recording.store(true, Ordering::SeqCst);
+                        info!("Recording generation {} started", new_generation);
                         let _ = response.send(Ok(()));
                     }
                     Err(e) => {
@@ -211,10 +238,29 @@ fn audio_thread(
                 }
             }
             Ok(AudioCommand::Stop { response }) => {
-                current_stream = None;
+                let gen = recording_generation.load(Ordering::SeqCst);
+                info!("Stopping recording generation {}", gen);
+
+                // 1. Stop accepting new samples immediately
                 is_recording.store(false, Ordering::SeqCst);
+
+                // 2. Properly stop stream: pause THEN drop
+                if let Some(stream) = current_stream.take() {
+                    if let Err(e) = stream.pause() {
+                        warn!("Failed to pause stream: {}", e);
+                    }
+                    drop(stream);
+                }
+
+                // 3. Small delay to let in-flight callbacks complete
+                std::thread::sleep(Duration::from_millis(50));
+
+                // 4. Take all samples from buffer
                 let samples = std::mem::take(&mut *buffer.lock());
-                info!("Recording stopped, {} samples captured", samples.len());
+                info!("Recording generation {} stopped: {} samples ({:.2}s @ 16kHz)",
+                      gen,
+                      samples.len(),
+                      samples.len() as f32 / 16000.0);
                 let _ = response.send(Ok(samples));
             }
             Ok(AudioCommand::Pause) => {
@@ -242,6 +288,8 @@ fn start_stream(
     is_paused: Arc<AtomicBool>,
     audio_level: Arc<Mutex<f32>>,
     sample_rate: Arc<Mutex<u32>>,
+    recording_generation: Arc<AtomicU64>,
+    expected_generation: u64,
 ) -> Result<cpal::Stream> {
     let host = cpal::default_host();
 
@@ -262,7 +310,10 @@ fn start_stream(
         .map_err(|e| AppError::Audio(e.to_string()))?;
 
     *sample_rate.lock() = config.sample_rate().0;
-    debug!("Sample rate: {}", config.sample_rate().0);
+    info!("Audio config: {}Hz, {} channels, {:?}",
+          config.sample_rate().0,
+          config.channels(),
+          config.sample_format());
 
     let err_fn = |err| warn!("Audio stream error: {}", err);
     let config_clone: StreamConfig = config.clone().into();
@@ -275,6 +326,8 @@ fn start_stream(
             is_recording,
             is_paused,
             audio_level,
+            recording_generation,
+            expected_generation,
             err_fn,
         )?,
         SampleFormat::I16 => build_stream_i16(
@@ -284,6 +337,8 @@ fn start_stream(
             is_recording,
             is_paused,
             audio_level,
+            recording_generation,
+            expected_generation,
             err_fn,
         )?,
         _ => return Err(AppError::Audio("Unsupported sample format".into())),
@@ -304,6 +359,8 @@ fn build_stream_f32<E>(
     is_recording: Arc<AtomicBool>,
     is_paused: Arc<AtomicBool>,
     audio_level: Arc<Mutex<f32>>,
+    recording_generation: Arc<AtomicU64>,
+    expected_generation: u64,
     err_fn: E,
 ) -> Result<cpal::Stream>
 where
@@ -313,6 +370,12 @@ where
         .build_input_stream(
             config,
             move |data: &[f32], _: &cpal::InputCallbackInfo| {
+                // Check generation FIRST - if it doesn't match, this callback is stale
+                if recording_generation.load(Ordering::SeqCst) != expected_generation {
+                    debug!("Stale callback rejected (gen {} != {})", expected_generation, recording_generation.load(Ordering::SeqCst));
+                    return;
+                }
+
                 if !is_recording.load(Ordering::SeqCst) || is_paused.load(Ordering::SeqCst) {
                     return;
                 }
@@ -339,6 +402,8 @@ fn build_stream_i16<E>(
     is_recording: Arc<AtomicBool>,
     is_paused: Arc<AtomicBool>,
     audio_level: Arc<Mutex<f32>>,
+    recording_generation: Arc<AtomicU64>,
+    expected_generation: u64,
     err_fn: E,
 ) -> Result<cpal::Stream>
 where
@@ -348,6 +413,12 @@ where
         .build_input_stream(
             config,
             move |data: &[i16], _: &cpal::InputCallbackInfo| {
+                // Check generation FIRST - if it doesn't match, this callback is stale
+                if recording_generation.load(Ordering::SeqCst) != expected_generation {
+                    debug!("Stale callback rejected (gen {} != {})", expected_generation, recording_generation.load(Ordering::SeqCst));
+                    return;
+                }
+
                 if !is_recording.load(Ordering::SeqCst) || is_paused.load(Ordering::SeqCst) {
                     return;
                 }

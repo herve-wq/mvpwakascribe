@@ -1,6 +1,8 @@
 import { AudioSettings } from "./AudioSettings";
 import { ShortcutSettings } from "./ShortcutSettings";
 import { AppearanceSettings } from "./AppearanceSettings";
+// Test button - commenter pour désactiver
+import { TestButton } from "../TestButton";
 
 interface SettingsProps {
   onClose: () => void;
@@ -79,6 +81,9 @@ export function Settings({ onClose }: SettingsProps) {
               <span className="text-[var(--color-text-primary)]">Intel UHD 630</span>
             </div>
           </div>
+
+          {/* Test button - commenter pour désactiver */}
+          <TestButton className="mt-4" />
         </div>
       </div>
 

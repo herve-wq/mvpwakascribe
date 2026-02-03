@@ -11,7 +11,7 @@ import {
   exportToDocx,
   copyToClipboard,
 } from "../lib/tauri";
-import type { Transcription, TranscriptionProgress } from "../lib/types";
+import type { Transcription, TranscriptionProgress, TranscriptionLanguage } from "../lib/types";
 
 export function useTranscription() {
   const { transcriptions, setTranscriptions, addTranscription } = useAppStore();
@@ -28,7 +28,8 @@ export function useTranscription() {
   const transcribeFile = useCallback(
     async (
       filePath: string,
-      onProgress?: (progress: TranscriptionProgress) => void
+      onProgress?: (progress: TranscriptionProgress) => void,
+      language?: TranscriptionLanguage
     ): Promise<Transcription | null> => {
       try {
         // Set up progress listener
@@ -42,7 +43,7 @@ export function useTranscription() {
           );
         }
 
-        const transcription = await tauriTranscribeFile(filePath);
+        const transcription = await tauriTranscribeFile(filePath, language);
         addTranscription(transcription);
 
         if (unlisten) {

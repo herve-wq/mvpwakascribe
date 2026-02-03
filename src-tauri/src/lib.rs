@@ -48,15 +48,15 @@ fn get_model_path() -> Option<PathBuf> {
     // Try relative to executable first (for development)
     if let Ok(exe_path) = std::env::current_exe() {
         // In development: src-tauri/target/debug/wakascribe
-        // Model is at project_root/model (4 levels up)
+        // Model is at project_root/modelbis (4 levels up) - using v3 model
         let mut path = exe_path.clone();
 
         // Go up from src-tauri/target/debug/wakascribe to project root
         for _ in 0..4 {
             path.pop();
         }
-        path.push("model");
 
+        path.push("model");
         if path.exists() {
             return Some(path);
         }
@@ -136,6 +136,7 @@ pub fn run() {
             commands::list_audio_devices,
             commands::start_recording,
             commands::stop_recording,
+            commands::stop_recording_to_wav,
             commands::pause_recording,
             commands::resume_recording,
             commands::get_audio_level,
@@ -153,6 +154,9 @@ pub fn run() {
             commands::export_to_txt,
             commands::export_to_docx,
             commands::copy_to_clipboard,
+            // Test commands - commenter pour désactiver
+            commands::test_transcription,
+            commands::check_test_audio,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

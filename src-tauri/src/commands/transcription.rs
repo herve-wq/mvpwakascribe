@@ -1,6 +1,6 @@
-use crate::audio::{duration_ms, load_audio_file, resample_to_16k};
+use crate::audio::{duration_ms, load_audio_file, normalize_audio, resample_to_16k};
 use crate::commands::audio::AudioState;
-use crate::engine::ParakeetEngine;
+use crate::engine::{ParakeetEngine, TranscriptionLanguage};
 use crate::error::{AppError, Result};
 use crate::storage::{
     self, insert_transcription, Transcription, TranscriptionProgress,
@@ -16,6 +16,7 @@ pub struct EngineState(pub Mutex<ParakeetEngine>);
 pub fn stop_recording(
     audio_state: State<'_, AudioState>,
     engine_state: State<'_, EngineState>,
+    language: Option<TranscriptionLanguage>,
 ) -> Result<Transcription> {
     let samples = audio_state.0.stop()?;
     let sample_rate = audio_state.0.sample_rate();
@@ -23,9 +24,15 @@ pub fn stop_recording(
     // Resample to 16kHz
     let resampled = resample_to_16k(&samples, sample_rate)?;
 
+    // Normalize audio level for consistent transcription
+    let (normalized, _gain) = normalize_audio(&resampled);
+
+    // Use provided language or default to Auto
+    let lang = language.unwrap_or_default();
+
     // Transcribe
-    let mut engine = engine_state.0.lock();
-    let transcription = engine.transcribe(&resampled, "dictation", None)?;
+    let engine = engine_state.0.lock();
+    let transcription = engine.transcribe(&normalized, "dictation", None, lang)?;
 
     // Save to database
     storage::with_db(|conn| insert_transcription(conn, &transcription))?;
@@ -38,6 +45,7 @@ pub async fn transcribe_file(
     window: Window,
     engine_state: State<'_, EngineState>,
     file_path: String,
+    language: Option<TranscriptionLanguage>,
 ) -> Result<Transcription> {
     let path = PathBuf::from(&file_path);
 
@@ -50,7 +58,9 @@ pub async fn transcribe_file(
         .and_then(|n| n.to_str())
         .map(String::from);
 
-    info!("Transcribing file: {:?}", path);
+    // Use provided language or default to Auto
+    let lang = language.unwrap_or_default();
+    info!("Transcribing file: {:?} with language: {:?}", path, lang);
 
     // Load and process audio
     let (samples, sample_rate) = load_audio_file(&path)?;
@@ -69,9 +79,12 @@ pub async fn transcribe_file(
     // Resample to 16kHz
     let resampled = resample_to_16k(&samples, sample_rate)?;
 
+    // Normalize audio level for consistent transcription
+    let (normalized, _gain) = normalize_audio(&resampled);
+
     // Transcribe
-    let mut engine = engine_state.0.lock();
-    let transcription = engine.transcribe(&resampled, "file", file_name)?;
+    let engine = engine_state.0.lock();
+    let transcription = engine.transcribe(&normalized, "file", file_name, lang)?;
 
     // Final progress
     let _ = window.emit(

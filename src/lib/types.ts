@@ -1,5 +1,14 @@
 // Core domain types
 
+// Language selection for transcription
+export type TranscriptionLanguage = "auto" | "french" | "english";
+
+export const TRANSCRIPTION_LANGUAGES: { value: TranscriptionLanguage; label: string }[] = [
+  { value: "auto", label: "Auto" },
+  { value: "french", label: "Français" },
+  { value: "english", label: "English" },
+];
+
 export interface Segment {
   id: string;
   startMs: number;

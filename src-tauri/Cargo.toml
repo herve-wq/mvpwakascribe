@@ -4,6 +4,7 @@ version = "0.1.0"
 description = "Offline speech-to-text application using Parakeet"
 authors = ["you"]
 edition = "2021"
+default-run = "wakascribe"
 
 [lib]
 name = "wakascribe_lib"
@@ -40,7 +41,7 @@ rubato = "0.15"        # Resampling
 docx-rs = "0.4"
 
 # OpenVINO for ONNX model inference (runtime-linking for homebrew install)
-openvino = { version = "0.8", features = ["runtime-linking"] }
+openvino = { version = "0.9.1", features = ["runtime-linking"] }
 
 # Mel spectrogram
 rustfft = "6"
@@ -49,3 +50,11 @@ ndarray = "0.16"
 [target.'cfg(target_os = "macos")'.dependencies]
 cocoa = "0.26"
 objc = "0.2"
+
+[[bin]]
+name = "test_openvino_state"
+path = "src/bin/test_openvino_state.rs"
+
+[[bin]]
+name = "test_full_pipeline"
+path = "src/bin/test_full_pipeline.rs"

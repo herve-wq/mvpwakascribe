@@ -40,11 +40,9 @@ impl Vocabulary {
         }
 
         // Find special token IDs
-        // In this vocab: 0 = <unk>, 819 = ▁ (space/blank for SentencePiece)
         let unk_id = *token_to_id.get("<unk>").unwrap_or(&0);
-        // Blank token for TDT is typically the last token or a special one
-        // Looking at vocab size 1031 (0-1030), blank might be separate
-        let blank_id = tokens.len(); // Use vocab_size as blank_id (out of vocab)
+        // Blank token for Parakeet TDT v3 is always 8192
+        let blank_id = 8192;
 
         Ok(Self {
             tokens,
@@ -63,11 +61,8 @@ impl Vocabulary {
     }
 
     pub fn is_special_token(&self, id: usize) -> bool {
-        if id >= self.tokens.len() {
-            return true;
-        }
-        let token = &self.tokens[id];
-        token.starts_with('<') && token.ends_with('>')
+        // Only the blank token (8192) is considered special for TDT decoding
+        id == self.blank_id
     }
 }
 
@@ -185,7 +180,8 @@ impl TDTDecoder {
 
     /// Decode a single token ID to text
     pub fn decode_single(&self, token_id: usize) -> String {
-        if self.vocab.is_special_token(token_id) || token_id >= self.vocab.vocab_size() {
+        // Skip blank token (8192) and out-of-range tokens
+        if token_id == 8192 || token_id >= self.vocab.vocab_size() {
             return String::new();
         }
         let token = self.vocab.decode_token(token_id);
