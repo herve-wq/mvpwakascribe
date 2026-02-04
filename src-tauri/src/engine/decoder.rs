@@ -14,7 +14,7 @@ pub struct Vocabulary {
 }
 
 impl Vocabulary {
-    /// Load vocabulary from JSON format (parakeet_vocab.json)
+    /// Load vocabulary from JSON format (parakeet_v3_vocab.json)
     /// Format: {"token_id": "token_text", ...}
     pub fn load_json(path: &Path) -> Result<Self> {
         let content = std::fs::read_to_string(path)
@@ -50,6 +50,64 @@ impl Vocabulary {
             blank_id,
             unk_id,
         })
+    }
+
+    /// Load vocabulary from TXT format (vocab.txt)
+    /// Format: "token index\n" (e.g., "<unk> 0\n<blk> 8192\n")
+    pub fn load_txt(path: &Path) -> Result<Self> {
+        let content = std::fs::read_to_string(path)
+            .map_err(|e| AppError::Io(e))?;
+
+        let mut tokens = Vec::new();
+        let mut token_to_id = HashMap::new();
+        let mut max_id = 0usize;
+
+        for line in content.lines() {
+            let line = line.trim();
+            if line.is_empty() {
+                continue;
+            }
+
+            // Split from the right to handle tokens with spaces
+            // Format: "token index" where index is the last element
+            if let Some(last_space) = line.rfind(' ') {
+                let token = &line[..last_space];
+                let id_str = &line[last_space + 1..];
+
+                if let Ok(id) = id_str.parse::<usize>() {
+                    // Extend tokens vector if needed
+                    if id >= tokens.len() {
+                        tokens.resize(id + 1, String::new());
+                    }
+                    tokens[id] = token.to_string();
+                    token_to_id.insert(token.to_string(), id);
+                    max_id = max_id.max(id);
+                }
+            }
+        }
+
+        // Find special token IDs
+        let unk_id = *token_to_id.get("<unk>").unwrap_or(&0);
+        // Blank token is "<blk>" in TXT format, always 8192
+        let blank_id = *token_to_id.get("<blk>").unwrap_or(&8192);
+
+        Ok(Self {
+            tokens,
+            token_to_id,
+            blank_id,
+            unk_id,
+        })
+    }
+
+    /// Load vocabulary, auto-detecting format from extension
+    pub fn load(path: &Path) -> Result<Self> {
+        match path.extension().and_then(|e| e.to_str()) {
+            Some("json") => Self::load_json(path),
+            Some("txt") => Self::load_txt(path),
+            _ => Err(AppError::Transcription(format!(
+                "Unknown vocabulary format: {:?}", path
+            ))),
+        }
     }
 
     pub fn decode_token(&self, id: usize) -> &str {

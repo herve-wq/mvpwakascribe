@@ -132,7 +132,7 @@ pub fn test_transcription(
     let (normalized, gain) = normalize_audio(&resampled);
     info!("Audio normalized with gain {:.1}x", gain);
 
-    // Transcrire (utilise Auto pour la détection automatique de langue)
+    // Transcrire (utilise Auto pour la détection automatique de langue, greedy decoding)
     let transcribe_start = Instant::now();
     let engine = engine_state.0.lock();
     let transcription = engine.transcribe(
@@ -140,6 +140,7 @@ pub fn test_transcription(
         "test",
         Some("test_audio.wav".to_string()),
         TranscriptionLanguage::Auto,
+        None, // Use default DecodingConfig (greedy)
     )?;
     let transcribe_time = transcribe_start.elapsed();
 

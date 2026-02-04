@@ -8,7 +8,7 @@ import {
   resumeRecording as tauriResumeRecording,
   getAudioLevel as tauriGetAudioLevel,
 } from "../lib/tauri";
-import type { Segment, StreamingSegment } from "../lib/types";
+import type { Segment, StreamingSegment, DecodingConfig } from "../lib/types";
 
 export function useRecording() {
   const {
@@ -17,6 +17,7 @@ export function useRecording() {
     elapsedMs,
     currentSegments,
     pendingText,
+    settings,
     setRecordingState,
     setElapsedMs,
     addSegment,
@@ -25,6 +26,13 @@ export function useRecording() {
     clearCurrentTranscription,
     addTranscription,
   } = useAppStore();
+
+  // Build DecodingConfig from settings
+  const getDecodingConfig = useCallback((): DecodingConfig => ({
+    beam_width: settings.transcription.beamWidth,
+    temperature: settings.transcription.temperature,
+    blank_penalty: settings.transcription.blankPenalty,
+  }), [settings.transcription]);
 
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const unlistenRefs = useRef<UnlistenFn[]>([]);
@@ -122,7 +130,10 @@ export function useRecording() {
   const stop = useCallback(async () => {
     try {
       setRecordingState("processing");
-      const transcription = await tauriStopRecording();
+      // Use global settings for language and decoding config
+      const language = settings.transcription.language;
+      const decodingConfig = getDecodingConfig();
+      const transcription = await tauriStopRecording(language, decodingConfig);
       addTranscription(transcription);
       setRecordingState("idle");
       return transcription;
@@ -131,7 +142,7 @@ export function useRecording() {
       setRecordingState("idle");
       return null;
     }
-  }, [setRecordingState, addTranscription]);
+  }, [setRecordingState, addTranscription, settings.transcription, getDecodingConfig]);
 
   const pause = useCallback(async () => {
     try {

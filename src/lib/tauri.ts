@@ -5,6 +5,7 @@ import type {
   Settings,
   TranscriptionProgress,
   TranscriptionLanguage,
+  DecodingConfig,
 } from "./types";
 
 // Audio commands
@@ -16,8 +17,11 @@ export async function startRecording(deviceId?: string): Promise<void> {
   return invoke("start_recording", { deviceId });
 }
 
-export async function stopRecording(): Promise<Transcription> {
-  return invoke("stop_recording");
+export async function stopRecording(
+  language?: TranscriptionLanguage,
+  decodingConfig?: DecodingConfig
+): Promise<Transcription> {
+  return invoke("stop_recording", { language, decodingConfig });
 }
 
 export async function stopRecordingToWav(): Promise<string> {
@@ -40,10 +44,11 @@ export async function getAudioLevel(): Promise<number> {
 export async function transcribeFile(
   filePath: string,
   language?: TranscriptionLanguage,
+  decodingConfig?: DecodingConfig,
   _onProgress?: (progress: TranscriptionProgress) => void
 ): Promise<Transcription> {
   // Progress updates come through Tauri events (handled via listen())
-  return invoke("transcribe_file", { filePath, language });
+  return invoke("transcribe_file", { filePath, language, decodingConfig });
 }
 
 // History commands
@@ -73,6 +78,15 @@ export async function getSettings(): Promise<Settings> {
 
 export async function updateSettings(settings: Partial<Settings>): Promise<void> {
   return invoke("update_settings", { settings });
+}
+
+// Engine commands
+export async function switchEngineBackend(backend: string): Promise<string> {
+  return invoke("switch_engine_backend", { backend });
+}
+
+export async function getEngineBackend(): Promise<string> {
+  return invoke("get_engine_backend");
 }
 
 // Export commands

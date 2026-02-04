@@ -28,6 +28,7 @@ rusqlite = { version = "0.31", features = ["bundled"] }
 uuid = { version = "1", features = ["v4"] }
 chrono = { version = "0.4", features = ["serde"] }
 thiserror = "1"
+regex = "1"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 parking_lot = "0.12"
@@ -43,6 +44,9 @@ docx-rs = "0.4"
 # OpenVINO for ONNX model inference (runtime-linking for homebrew install)
 openvino = { version = "0.9.1", features = ["runtime-linking"] }
 
+# ONNX Runtime for alternative backend
+ort = { version = "2.0.0-rc.11", features = ["load-dynamic"] }
+
 # Mel spectrogram
 rustfft = "6"
 ndarray = "0.16"
@@ -50,6 +54,8 @@ ndarray = "0.16"
 [target.'cfg(target_os = "macos")'.dependencies]
 cocoa = "0.26"
 objc = "0.2"
+core-foundation = "0.10"      # For CFString, CFURL (CoreML FFI)
+block = "0.1"                  # For Objective-C closures
 
 [[bin]]
 name = "test_openvino_state"
@@ -58,3 +64,11 @@ path = "src/bin/test_openvino_state.rs"
 [[bin]]
 name = "test_full_pipeline"
 path = "src/bin/test_full_pipeline.rs"
+
+[[bin]]
+name = "test_onnxruntime"
+path = "src/bin/test_onnxruntime.rs"
+
+[[bin]]
+name = "test_coreml"
+path = "src/bin/test_coreml.rs"

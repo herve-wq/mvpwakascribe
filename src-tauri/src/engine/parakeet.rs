@@ -1,5 +1,7 @@
 use crate::audio::{split_audio_smart, SmartChunkConfig};
+use crate::engine::config::DecodingConfig;
 use crate::engine::decoder::{TDTDecoder, Vocabulary};
+use crate::engine::{filter_chunk_hallucinations, ASREngine, MAX_AUDIO_SAMPLES};
 use crate::error::{AppError, Result};
 use crate::storage::{Segment, Transcription};
 use openvino::{CompiledModel, Core, DeviceType, InferRequest};
@@ -46,6 +48,10 @@ impl TranscriptionLanguage {
 /// Token spécial pour le blank (pas de sortie)
 const BLANK_TOKEN: u32 = 8192;
 
+/// Tokens de contrôle pour le conditionnement du décodeur
+const TOKEN_START_OF_TRANSCRIPT: i64 = 4;   // <|startoftranscript|>
+const TOKEN_NO_PREDICT_LANG: i64 = 23;      // <|nopredict_lang|>
+
 /// Nombre de classes de durée TDT (1, 2, 3, 4, 5 frames)
 const NUM_DURATION_CLASSES: usize = 5;
 
@@ -57,9 +63,6 @@ const DECODER_HIDDEN_DIM: usize = 640;
 
 /// Nombre de couches LSTM
 const DECODER_NUM_LAYERS: usize = 2;
-
-/// Maximum audio samples (15 seconds at 16kHz)
-const MAX_AUDIO_SAMPLES: usize = 240000;
 
 /// Maximum mel frames
 const MAX_MEL_FRAMES: usize = 1501;
@@ -76,9 +79,26 @@ const MAX_ENCODER_TIME: usize = 188;
 /// Hop length for mel spectrogram (samples per frame)
 const HOP_LENGTH: usize = 160;
 
-/// Blank penalty: valeur à soustraire du logit du blank token
+/// Default blank penalty (used when no config provided)
 /// Augmenter cette valeur réduit le biais vers blank
-const BLANK_PENALTY: f32 = 6.0;
+const DEFAULT_BLANK_PENALTY: f32 = 6.0;
+
+/// Beam hypothesis for beam search decoding
+#[derive(Clone)]
+struct BeamHypothesis {
+    /// Emitted tokens so far
+    tokens: Vec<u32>,
+    /// Cumulative log probability score
+    score: f32,
+    /// LSTM hidden state [2 * 640]
+    h_state: Vec<f32>,
+    /// LSTM cell state [2 * 640]
+    c_state: Vec<f32>,
+    /// Last emitted token (or BLANK)
+    last_token: i64,
+    /// Current time position in encoder output
+    current_time: usize,
+}
 
 /// Parakeet STT Engine using OpenVINO with 4 separate models
 pub struct ParakeetEngine {
@@ -275,8 +295,10 @@ impl ParakeetEngine {
         source_type: &str,
         source_name: Option<String>,
         language: TranscriptionLanguage,
+        decoding_config: Option<DecodingConfig>,
     ) -> Result<Transcription> {
         let duration_ms = (samples.len() as f64 / 16000.0 * 1000.0) as i64;
+        let config = decoding_config.unwrap_or_default();
 
         if !self.is_loaded() {
             info!("Model not loaded, returning mock transcription");
@@ -284,13 +306,15 @@ impl ParakeetEngine {
         }
 
         info!(
-            "Transcribing {} samples ({} ms) with language: {:?}",
+            "Transcribing {} samples ({} ms) with language: {:?}, beam_width: {}, temperature: {:.2}",
             samples.len(),
             duration_ms,
-            language
+            language,
+            config.beam_width,
+            config.temperature
         );
 
-        match self.run_inference(samples, language) {
+        match self.run_inference(samples, language, &config) {
             Ok(text) => {
                 let now = chrono::Utc::now().to_rfc3339();
                 let segments = vec![Segment {
@@ -323,7 +347,12 @@ impl ParakeetEngine {
     }
 
     /// Pipeline complet de transcription TDT avec support chunking
-    fn run_inference(&self, audio: &[f32], language: TranscriptionLanguage) -> Result<String> {
+    fn run_inference(
+        &self,
+        audio: &[f32],
+        language: TranscriptionLanguage,
+        config: &DecodingConfig,
+    ) -> Result<String> {
         info!("Starting TDT inference on {} audio samples", audio.len());
 
         // Check if audio needs chunking
@@ -333,15 +362,20 @@ impl ParakeetEngine {
                 audio.len(),
                 audio.len() as f32 / 16000.0
             );
-            return self.run_chunked_inference(audio, language);
+            return self.run_chunked_inference(audio, language, config);
         }
 
         // Single chunk inference
-        self.run_single_inference(audio, language)
+        self.run_single_inference(audio, language, config)
     }
 
     /// Run inference on a single chunk (max 15s)
-    fn run_single_inference(&self, audio: &[f32], language: TranscriptionLanguage) -> Result<String> {
+    fn run_single_inference(
+        &self,
+        audio: &[f32],
+        language: TranscriptionLanguage,
+        config: &DecodingConfig,
+    ) -> Result<String> {
         // Reset all InferRequests to ensure clean state
         self.reset_all_requests()?;
 
@@ -403,8 +437,18 @@ impl ParakeetEngine {
             ));
         }
 
-        // Étape 3: Décodage TDT greedy (utiliser seulement les time steps valides!)
-        let tokens = self.tdt_greedy_decode(&encoder_output, valid_encoder_time, language)?;
+        // Étape 3: Décodage TDT (greedy ou beam search selon config)
+        info!(
+            "TDT decode config: beam={}, temp={:.2}, blank_penalty={:.1}",
+            config.beam_width, config.temperature, config.blank_penalty
+        );
+        let tokens = if config.beam_width <= 1 {
+            // Greedy decoding (fastest)
+            self.tdt_greedy_decode(&encoder_output, valid_encoder_time, language, config)?
+        } else {
+            // Beam search decoding (higher quality)
+            self.tdt_beam_decode(&encoder_output, valid_encoder_time, language, config)?
+        };
         info!("TDT decoding produced {} tokens", tokens.len());
 
         // Étape 4: Convertir tokens en texte
@@ -424,10 +468,15 @@ impl ParakeetEngine {
     ///
     /// Instead of fixed overlap, this cuts at silence points to avoid
     /// splitting words. The resulting chunks can be simply concatenated.
-    fn run_chunked_inference(&self, audio: &[f32], language: TranscriptionLanguage) -> Result<String> {
+    fn run_chunked_inference(
+        &self,
+        audio: &[f32],
+        language: TranscriptionLanguage,
+        decoding_config: &DecodingConfig,
+    ) -> Result<String> {
         // Use smart VAD-based chunking (cuts at silence points)
-        let config = SmartChunkConfig::default(); // 8-14s, cuts at silence
-        let chunks = split_audio_smart(audio, &config);
+        let chunk_config = SmartChunkConfig::default(); // 8-14s, cuts at silence
+        let chunks = split_audio_smart(audio, &chunk_config);
 
         info!(
             "Processing {} chunks for {:.1}s audio (VAD-based smart chunking)",
@@ -448,14 +497,20 @@ impl ParakeetEngine {
                 chunk_duration
             );
 
-            match self.run_single_inference(&chunk.samples, language) {
+            match self.run_single_inference(&chunk.samples, language, decoding_config) {
                 Ok(text) => {
-                    let text = text.trim().to_string();
+                    let raw_text = text.trim().to_string();
+                    // Filter hallucinations at chunk start (punctuation, short nonsense words)
+                    let text = filter_chunk_hallucinations(&raw_text);
                     if !text.is_empty() {
-                        info!("Chunk {} transcription: '{}'", i + 1, text);
+                        if text != raw_text {
+                            info!("Chunk {} transcription (filtered): '{}' -> '{}'", i + 1, raw_text, text);
+                        } else {
+                            info!("Chunk {} transcription: '{}'", i + 1, text);
+                        }
                         transcriptions.push(text);
                     } else {
-                        debug!("Chunk {} produced empty transcription (silence?)", i + 1);
+                        debug!("Chunk {} produced empty transcription after filtering (silence?)", i + 1);
                     }
                 }
                 Err(e) => {
@@ -593,6 +648,7 @@ impl ParakeetEngine {
         encoder_output: &[f32],
         encoder_time: usize,
         language: TranscriptionLanguage,
+        config: &DecodingConfig,
     ) -> Result<Vec<u32>> {
         let decoder_request = self.decoder_request.as_ref().unwrap();
         let joint_request = self.joint_request.as_ref().unwrap();
@@ -608,29 +664,53 @@ impl ParakeetEngine {
 
         let mut tokens: Vec<u32> = Vec::new();
 
-        // Si une langue est forcée, initialiser le decoder avec le token de langue
+        // Si une langue est forcée, initialiser le decoder avec la séquence de tokens correcte
+        // Séquence: <|startoftranscript|> → <|nopredict_lang|> → <|lang|>
         if let Some(lang_token) = language.token_id() {
             info!(
-                "Forcing language with token {} ({})",
-                lang_token,
-                language.display_name()
+                "Forcing language with token sequence: startoftranscript(4) → nopredict_lang(23) → {}({}) ",
+                language.display_name(),
+                lang_token
             );
 
-            // Exécuter une étape du décodeur avec le token de langue
-            // pour conditionner l'état LSTM
+            // Étape 1: <|startoftranscript|> (token 4)
+            let (_, new_h, new_c) = self.run_decoder_step(
+                &mut decoder_request,
+                TOKEN_START_OF_TRANSCRIPT,
+                &h_state,
+                &c_state,
+            )?;
+            h_state = new_h;
+            c_state = new_c;
+            debug!("Decoder step 1: <|startoftranscript|>");
+
+            // Étape 2: <|nopredict_lang|> (token 23) - désactive l'auto-détection
+            let (_, new_h, new_c) = self.run_decoder_step(
+                &mut decoder_request,
+                TOKEN_NO_PREDICT_LANG,
+                &h_state,
+                &c_state,
+            )?;
+            h_state = new_h;
+            c_state = new_c;
+            debug!("Decoder step 2: <|nopredict_lang|>");
+
+            // Étape 3: Token de langue (ex: 71 pour français)
             let (_, new_h, new_c) = self.run_decoder_step(
                 &mut decoder_request,
                 lang_token,
                 &h_state,
                 &c_state,
             )?;
-
-            // Mettre à jour les états LSTM avec le contexte de langue
             h_state = new_h;
             c_state = new_c;
-            last_token = lang_token;
+            debug!("Decoder step 3: <|{}|>", language.display_name());
 
-            debug!("Decoder conditioned with language token");
+            // IMPORTANT: Remettre last_token à BLANK pour le décodage normal
+            // (ne pas garder le token de langue comme contexte)
+            last_token = BLANK_TOKEN as i64;
+
+            info!("Decoder conditioned with full language sequence, starting with BLANK");
         }
         let mut t: usize = 0;
 
@@ -678,7 +758,7 @@ impl ParakeetEngine {
             )?;
 
             // Étape 3: Decode TDT output
-            let (token, duration) = self.decode_tdt_output(&logits);
+            let (token, duration) = self.decode_tdt_output(&logits, config.temperature, config.blank_penalty);
 
             // Debug log for first few iterations - with logits analysis
             if iterations <= 5 || tokens.len() < 10 {
@@ -829,17 +909,25 @@ impl ParakeetEngine {
     }
 
     /// Décode la sortie TDT: token + durée
-    fn decode_tdt_output(&self, logits: &[f32]) -> (u32, u32) {
+    /// temperature: scaling factor for logits (1.0 = no scaling, <1.0 = more conservative)
+    /// blank_penalty: value to subtract from blank token logit
+    fn decode_tdt_output(&self, logits: &[f32], temperature: f32, blank_penalty: f32) -> (u32, u32) {
+        // Apply temperature scaling if needed
+        let temp = if temperature > 0.0 { temperature } else { 1.0 };
+
         // Les premiers VOCAB_SIZE logits sont pour les tokens
         let token_logits = &logits[..VOCAB_SIZE];
         let mut max_token = 0u32;
-        let mut max_token_val = token_logits[0];
+        let mut max_token_val = f32::NEG_INFINITY;
+
         for (i, &val) in token_logits.iter().enumerate() {
+            // Apply temperature scaling
+            let scaled_val = val / temp;
             // Appliquer la pénalité blank pour réduire le biais vers blank
             let adjusted_val = if i == BLANK_TOKEN as usize {
-                val - BLANK_PENALTY
+                scaled_val - blank_penalty
             } else {
-                val
+                scaled_val
             };
             if adjusted_val > max_token_val {
                 max_token_val = adjusted_val;
@@ -850,10 +938,11 @@ impl ParakeetEngine {
         // Les NUM_DURATION_CLASSES derniers sont pour les durées
         let duration_logits = &logits[VOCAB_SIZE..VOCAB_SIZE + NUM_DURATION_CLASSES];
         let mut max_dur = 0u32;
-        let mut max_dur_val = duration_logits[0];
+        let mut max_dur_val = duration_logits[0] / temp;
         for (i, &val) in duration_logits.iter().enumerate() {
-            if val > max_dur_val {
-                max_dur_val = val;
+            let scaled_val = val / temp;
+            if scaled_val > max_dur_val {
+                max_dur_val = scaled_val;
                 max_dur = i as u32;
             }
         }
@@ -862,6 +951,244 @@ impl ParakeetEngine {
         let duration = max_dur + 1;
 
         (max_token, duration)
+    }
+
+    /// Get top-k tokens with their log probabilities from logits
+    /// Returns Vec of (token_id, log_probability)
+    fn get_top_k_tokens(&self, logits: &[f32], k: usize, temperature: f32, blank_penalty: f32) -> Vec<(u32, f32)> {
+        let temp = if temperature > 0.0 { temperature } else { 1.0 };
+        let token_logits = &logits[..VOCAB_SIZE];
+
+        // Apply temperature scaling and blank penalty
+        let mut scored: Vec<(u32, f32)> = token_logits
+            .iter()
+            .enumerate()
+            .map(|(i, &val)| {
+                let scaled = val / temp;
+                let adjusted = if i == BLANK_TOKEN as usize {
+                    scaled - blank_penalty
+                } else {
+                    scaled
+                };
+                (i as u32, adjusted)
+            })
+            .collect();
+
+        // Sort by score descending
+        scored.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+
+        // Return top-k
+        scored.truncate(k);
+        scored
+    }
+
+    /// Get best duration from logits
+    fn get_best_duration(&self, logits: &[f32], temperature: f32) -> u32 {
+        let temp = if temperature > 0.0 { temperature } else { 1.0 };
+        let duration_logits = &logits[VOCAB_SIZE..VOCAB_SIZE + NUM_DURATION_CLASSES];
+
+        let mut max_dur = 0u32;
+        let mut max_dur_val = duration_logits[0] / temp;
+        for (i, &val) in duration_logits.iter().enumerate() {
+            let scaled_val = val / temp;
+            if scaled_val > max_dur_val {
+                max_dur_val = scaled_val;
+                max_dur = i as u32;
+            }
+        }
+        max_dur + 1 // Duration is 1-indexed
+    }
+
+    /// TDT beam search decoding
+    fn tdt_beam_decode(
+        &self,
+        encoder_output: &[f32],
+        encoder_time: usize,
+        language: TranscriptionLanguage,
+        config: &DecodingConfig,
+    ) -> Result<Vec<u32>> {
+        let decoder_request = self.decoder_request.as_ref().unwrap();
+        let joint_request = self.joint_request.as_ref().unwrap();
+        let mut decoder_request = decoder_request.lock().unwrap();
+        let mut joint_request = joint_request.lock().unwrap();
+
+        let beam_width = config.beam_width.max(1);
+        let temperature = config.temperature;
+
+        info!(
+            "Starting beam search decode: beam_width={}, temp={:.2}, blank_penalty={:.1}",
+            beam_width, temperature, config.blank_penalty
+        );
+
+        // Initialize beams
+        let mut beams: Vec<BeamHypothesis> = vec![BeamHypothesis {
+            tokens: Vec::new(),
+            score: 0.0,
+            h_state: vec![0.0f32; DECODER_NUM_LAYERS * DECODER_HIDDEN_DIM],
+            c_state: vec![0.0f32; DECODER_NUM_LAYERS * DECODER_HIDDEN_DIM],
+            last_token: BLANK_TOKEN as i64,
+            current_time: 0,
+        }];
+
+        // If language is forced, condition all beams
+        if let Some(lang_token) = language.token_id() {
+            info!(
+                "Conditioning beams with language: {} (token {})",
+                language.display_name(),
+                lang_token
+            );
+
+            // Run conditioning sequence on the single initial beam
+            let beam = &mut beams[0];
+
+            // Step 1: <|startoftranscript|>
+            let (_, new_h, new_c) = self.run_decoder_step(
+                &mut decoder_request,
+                TOKEN_START_OF_TRANSCRIPT,
+                &beam.h_state,
+                &beam.c_state,
+            )?;
+            beam.h_state = new_h;
+            beam.c_state = new_c;
+
+            // Step 2: <|nopredict_lang|>
+            let (_, new_h, new_c) = self.run_decoder_step(
+                &mut decoder_request,
+                TOKEN_NO_PREDICT_LANG,
+                &beam.h_state,
+                &beam.c_state,
+            )?;
+            beam.h_state = new_h;
+            beam.c_state = new_c;
+
+            // Step 3: Language token
+            let (_, new_h, new_c) = self.run_decoder_step(
+                &mut decoder_request,
+                lang_token,
+                &beam.h_state,
+                &beam.c_state,
+            )?;
+            beam.h_state = new_h;
+            beam.c_state = new_c;
+
+            // Reset last_token to BLANK for normal decoding
+            beam.last_token = BLANK_TOKEN as i64;
+        }
+
+        // Buffer for encoder frame
+        let mut encoder_frame = vec![0.0f32; ENCODER_OUTPUT_DIM];
+
+        // Safety limit
+        let max_iterations = encoder_time * 10;
+        let mut iterations = 0;
+
+        // Main beam search loop
+        while iterations < max_iterations {
+            iterations += 1;
+
+            // Check if all beams have finished (reached end of encoder)
+            let active_beams: Vec<_> = beams
+                .iter()
+                .filter(|b| b.current_time < encoder_time)
+                .collect();
+
+            if active_beams.is_empty() {
+                break;
+            }
+
+            let mut new_beams: Vec<BeamHypothesis> = Vec::new();
+
+            for beam in beams.iter() {
+                if beam.current_time >= encoder_time {
+                    // Beam finished, keep it as-is
+                    new_beams.push(beam.clone());
+                    continue;
+                }
+
+                let t = beam.current_time;
+
+                // Extract encoder frame at time t
+                for i in 0..ENCODER_OUTPUT_DIM {
+                    encoder_frame[i] = encoder_output[i * MAX_ENCODER_TIME + t];
+                }
+
+                // Run decoder step
+                let (dec_out, new_h, new_c) = self.run_decoder_step(
+                    &mut decoder_request,
+                    beam.last_token,
+                    &beam.h_state,
+                    &beam.c_state,
+                )?;
+
+                // Run joint network
+                let logits = self.run_joint_step(&mut joint_request, &encoder_frame, &dec_out)?;
+
+                // Get top-k tokens
+                let top_k = self.get_top_k_tokens(&logits, beam_width, temperature, config.blank_penalty);
+                let duration = self.get_best_duration(&logits, temperature);
+
+                // Expand beam with top-k tokens
+                for (token, log_prob) in top_k {
+                    let mut new_beam = BeamHypothesis {
+                        tokens: beam.tokens.clone(),
+                        score: beam.score + log_prob,
+                        h_state: beam.h_state.clone(),
+                        c_state: beam.c_state.clone(),
+                        last_token: beam.last_token,
+                        current_time: beam.current_time,
+                    };
+
+                    if token == BLANK_TOKEN {
+                        // Blank: advance time, keep states
+                        new_beam.current_time += duration as usize;
+                    } else {
+                        // Token emitted: update states and advance time
+                        new_beam.tokens.push(token);
+                        new_beam.last_token = token as i64;
+                        new_beam.h_state = new_h.clone();
+                        new_beam.c_state = new_c.clone();
+                        new_beam.current_time += duration as usize;
+                    }
+
+                    new_beams.push(new_beam);
+                }
+            }
+
+            // Keep only top beam_width beams by score
+            new_beams.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
+            new_beams.truncate(beam_width);
+            beams = new_beams;
+
+            // Debug logging for first few iterations
+            if iterations <= 3 {
+                debug!(
+                    "Beam search iter {}: {} beams, best score={:.4}, best tokens={}",
+                    iterations,
+                    beams.len(),
+                    beams.first().map(|b| b.score).unwrap_or(0.0),
+                    beams.first().map(|b| b.tokens.len()).unwrap_or(0)
+                );
+            }
+        }
+
+        if iterations >= max_iterations {
+            warn!("Beam search reached max iterations limit");
+        }
+
+        // Return tokens from best beam
+        let best_tokens = beams
+            .into_iter()
+            .max_by(|a, b| a.score.partial_cmp(&b.score).unwrap_or(std::cmp::Ordering::Equal))
+            .map(|b| b.tokens)
+            .unwrap_or_default();
+
+        info!(
+            "Beam search decoded {} tokens in {} iterations",
+            best_tokens.len(),
+            iterations
+        );
+
+        Ok(best_tokens)
     }
 
     /// Mock transcription for development without the model
@@ -931,4 +1258,37 @@ fn count_nonzero(data: &[f32]) -> f32 {
     }
     let nonzero = data.iter().filter(|&&v| v.abs() > 1e-9).count();
     nonzero as f32 / data.len() as f32
+}
+
+// ============================================================================
+// ASREngine trait implementation for OpenVINO backend
+// ============================================================================
+
+impl ASREngine for ParakeetEngine {
+    fn name(&self) -> &str {
+        "OpenVINO"
+    }
+
+    fn is_loaded(&self) -> bool {
+        self.mel_request.is_some()
+            && self.encoder_request.is_some()
+            && self.decoder_request.is_some()
+            && self.joint_request.is_some()
+            && self.tdt_decoder.is_some()
+    }
+
+    fn load_model(&mut self, model_dir: &Path) -> Result<()> {
+        // Delegate to the existing load_model method
+        ParakeetEngine::load_model(self, model_dir)
+    }
+
+    fn run_inference(
+        &self,
+        samples: &[f32],
+        language: TranscriptionLanguage,
+        config: &DecodingConfig,
+    ) -> Result<String> {
+        // Delegate to the existing run_inference method
+        ParakeetEngine::run_inference(self, samples, language, config)
+    }
 }

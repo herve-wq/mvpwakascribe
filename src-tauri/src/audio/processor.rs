@@ -5,7 +5,7 @@ use std::path::Path;
 use tracing::info;
 
 const TARGET_SAMPLE_RATE: u32 = 16000;
-const TARGET_RMS: f32 = 0.05; // Target RMS for normalization (based on working test file)
+const TARGET_RMS: f32 = 0.15; // Target RMS for normalization (based on working test file)
 const MIN_RMS_THRESHOLD: f32 = 0.001; // Below this, audio is considered silence
 
 /// Resample audio to 16kHz mono

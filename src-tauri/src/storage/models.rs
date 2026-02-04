@@ -33,6 +33,8 @@ pub struct Settings {
     pub language: String,
     pub input_device_id: Option<String>,
     pub shortcuts: ShortcutSettings,
+    /// Inference engine backend: "openvino", "onnxruntime", or "coreml" (macOS only)
+    pub engine_backend: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -54,6 +56,7 @@ impl Default for Settings {
                 pause: "CommandOrControl+Shift+P".to_string(),
                 copy: "CommandOrControl+Shift+C".to_string(),
             },
+            engine_backend: "openvino".to_string(), // Default to OpenVINO
         }
     }
 }

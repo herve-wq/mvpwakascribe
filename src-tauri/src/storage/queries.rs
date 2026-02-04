@@ -168,6 +168,7 @@ pub fn get_settings(conn: &Connection) -> Result<Settings> {
             "shortcut_toggle_recording" => settings.shortcuts.toggle_recording = value,
             "shortcut_pause" => settings.shortcuts.pause = value,
             "shortcut_copy" => settings.shortcuts.copy = value,
+            "engine_backend" => settings.engine_backend = value,
             _ => {}
         }
     }
@@ -185,6 +186,7 @@ pub fn update_settings(conn: &Connection, settings: &Settings) -> Result<()> {
         ),
         ("shortcut_pause", settings.shortcuts.pause.clone()),
         ("shortcut_copy", settings.shortcuts.copy.clone()),
+        ("engine_backend", settings.engine_backend.clone()),
     ];
 
     for (key, value) in pairs {

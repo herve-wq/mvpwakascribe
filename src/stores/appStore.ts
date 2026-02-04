@@ -7,6 +7,7 @@ import type {
   Settings,
   AudioDevice,
 } from "../lib/types";
+import { DEFAULT_TRANSCRIPTION_SETTINGS } from "../lib/types";
 
 interface AppState {
   // Recording state
@@ -58,6 +59,8 @@ const defaultSettings: Settings = {
     pause: "CommandOrControl+Shift+P",
     copy: "CommandOrControl+Shift+C",
   },
+  transcription: DEFAULT_TRANSCRIPTION_SETTINGS,
+  engineBackend: "openvino",
 };
 
 export const useAppStore = create<AppState>((set) => ({

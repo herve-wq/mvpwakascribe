@@ -11,10 +11,17 @@ import {
   exportToDocx,
   copyToClipboard,
 } from "../lib/tauri";
-import type { Transcription, TranscriptionProgress, TranscriptionLanguage } from "../lib/types";
+import type { Transcription, TranscriptionProgress, DecodingConfig } from "../lib/types";
 
 export function useTranscription() {
-  const { transcriptions, setTranscriptions, addTranscription } = useAppStore();
+  const { transcriptions, setTranscriptions, addTranscription, settings } = useAppStore();
+
+  // Build DecodingConfig from settings
+  const getDecodingConfig = useCallback((): DecodingConfig => ({
+    beam_width: settings.transcription.beamWidth,
+    temperature: settings.transcription.temperature,
+    blank_penalty: settings.transcription.blankPenalty,
+  }), [settings.transcription]);
 
   const loadTranscriptions = useCallback(async () => {
     try {
@@ -28,8 +35,7 @@ export function useTranscription() {
   const transcribeFile = useCallback(
     async (
       filePath: string,
-      onProgress?: (progress: TranscriptionProgress) => void,
-      language?: TranscriptionLanguage
+      onProgress?: (progress: TranscriptionProgress) => void
     ): Promise<Transcription | null> => {
       try {
         // Set up progress listener
@@ -43,7 +49,11 @@ export function useTranscription() {
           );
         }
 
-        const transcription = await tauriTranscribeFile(filePath, language);
+        // Use global settings for language and decoding config
+        const language = settings.transcription.language;
+        const decodingConfig = getDecodingConfig();
+
+        const transcription = await tauriTranscribeFile(filePath, language, decodingConfig);
         addTranscription(transcription);
 
         if (unlisten) {
@@ -56,7 +66,7 @@ export function useTranscription() {
         return null;
       }
     },
-    [addTranscription]
+    [addTranscription, settings.transcription, getDecodingConfig]
   );
 
   const deleteTranscription = useCallback(
@@ -113,5 +123,8 @@ export function useTranscription() {
     exportTxt,
     exportDocx,
     copyText,
+    // Expose transcription settings for components that need them
+    transcriptionSettings: settings.transcription,
+    getDecodingConfig,
   };
 }

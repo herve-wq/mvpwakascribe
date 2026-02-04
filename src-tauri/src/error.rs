@@ -25,6 +25,9 @@ pub enum AppError {
 
     #[error("Invalid state: {0}")]
     InvalidState(String),
+
+    #[error("Invalid input: {0}")]
+    InvalidInput(String),
 }
 
 impl serde::Serialize for AppError {

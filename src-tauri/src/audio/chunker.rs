@@ -37,6 +37,8 @@ pub struct SmartChunkConfig {
     pub target_chunk_seconds: f32,
     /// Maximum chunk duration in seconds (hard limit)
     pub max_chunk_seconds: f32,
+    /// Overlap in seconds between chunks (to avoid losing content at boundaries)
+    pub overlap_seconds: f32,
     /// VAD configuration for silence detection
     pub vad_config: VadConfig,
 }
@@ -47,6 +49,7 @@ impl Default for SmartChunkConfig {
             min_chunk_seconds: 8.0,
             target_chunk_seconds: 10.0,
             max_chunk_seconds: MAX_CHUNK_SECONDS,
+            overlap_seconds: 0.5, // 0.5 second overlap to capture boundary words
             vad_config: VadConfig::default(),
         }
     }
@@ -59,6 +62,7 @@ impl SmartChunkConfig {
             min_chunk_seconds: min_seconds,
             target_chunk_seconds: target_seconds,
             max_chunk_seconds: max_seconds.min(MAX_CHUNK_SECONDS),
+            overlap_seconds: 0.5,
             vad_config: VadConfig::default(),
         }
     }
@@ -73,6 +77,10 @@ impl SmartChunkConfig {
 
     fn max_samples(&self) -> usize {
         (self.max_chunk_seconds * SAMPLE_RATE as f32) as usize
+    }
+
+    fn overlap_samples(&self) -> usize {
+        (self.overlap_seconds * SAMPLE_RATE as f32) as usize
     }
 }
 
@@ -144,9 +152,18 @@ pub fn split_audio_smart(samples: &[f32], config: &SmartChunkConfig) -> Vec<Audi
         // Log cut decision
         let cut_time = cut_point as f32 / SAMPLE_RATE as f32;
         let chunk_duration = (cut_point - chunk_start) as f32 / SAMPLE_RATE as f32;
+
+        // Only add overlap when NOT cutting at silence (to avoid word truncation)
+        // When cutting at silence, there's no word to split, so no overlap needed
+        let overlap = if is_silence {
+            0
+        } else {
+            config.overlap_samples()
+        };
+
         if is_silence {
             info!(
-                "Chunk {}: cut at {:.2}s (silence, RMS={:.4}), duration={:.2}s",
+                "Chunk {}: cut at {:.2}s (silence, RMS={:.4}), duration={:.2}s, no overlap",
                 chunks.len(),
                 cut_time,
                 rms,
@@ -154,18 +171,21 @@ pub fn split_audio_smart(samples: &[f32], config: &SmartChunkConfig) -> Vec<Audi
             );
         } else {
             info!(
-                "Chunk {}: cut at {:.2}s (min energy, RMS={:.4}), duration={:.2}s",
+                "Chunk {}: cut at {:.2}s (min energy, RMS={:.4}), duration={:.2}s, overlap={:.1}s",
                 chunks.len(),
                 cut_time,
                 rms,
-                chunk_duration
+                chunk_duration,
+                config.overlap_seconds
             );
         }
 
-        // Create chunk
-        let chunk_samples = samples[chunk_start..cut_point].to_vec();
+        // Create chunk - only add overlap when NOT cutting at silence
+        // When cutting at silence, the word boundary is clean
+        let chunk_end = (cut_point + overlap).min(total_samples);
+        let chunk_samples = samples[chunk_start..chunk_end].to_vec();
         let start_ms = (chunk_start as f64 / SAMPLE_RATE as f64 * 1000.0) as i64;
-        let end_ms = (cut_point as f64 / SAMPLE_RATE as f64 * 1000.0) as i64;
+        let end_ms = (chunk_end as f64 / SAMPLE_RATE as f64 * 1000.0) as i64;
 
         chunks.push(AudioChunk {
             samples: chunk_samples,
@@ -175,7 +195,10 @@ pub fn split_audio_smart(samples: &[f32], config: &SmartChunkConfig) -> Vec<Audi
             total_chunks: 0,
         });
 
-        // Move to next chunk
+        // Move to next chunk starting at cut point
+        // The overlap region [cut_point ... cut_point + overlap] is in current chunk
+        // Next chunk will start fresh from cut_point, potentially capturing same content
+        // The merger will deduplicate overlapping transcriptions
         chunk_start = cut_point;
     }
 

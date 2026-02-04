@@ -1,11 +1,11 @@
 mod audio;
 mod commands;
-mod engine;
+pub mod engine;
 mod error;
 mod export;
 mod storage;
 
-use commands::{AudioState, EngineState};
+use commands::{AudioState, EngineState, ModelPathState};
 use parking_lot::Mutex;
 use std::path::PathBuf;
 use std::fs::File;
@@ -43,12 +43,12 @@ fn init_openvino() -> bool {
     false
 }
 
-/// Get the model directory path
-fn get_model_path() -> Option<PathBuf> {
+/// Get the base model directory path
+fn get_model_base_path() -> Option<PathBuf> {
     // Try relative to executable first (for development)
     if let Ok(exe_path) = std::env::current_exe() {
         // In development: src-tauri/target/debug/wakascribe
-        // Model is at project_root/modelbis (4 levels up) - using v3 model
+        // Model is at project_root/model (4 levels up)
         let mut path = exe_path.clone();
 
         // Go up from src-tauri/target/debug/wakascribe to project root
@@ -82,6 +82,17 @@ fn get_model_path() -> Option<PathBuf> {
     None
 }
 
+/// Get model path for specific backend
+fn get_model_path(backend: engine::EngineBackend) -> Option<PathBuf> {
+    let base_path = get_model_base_path()?;
+    let backend_path = base_path.join(backend.model_subdir());
+    if backend_path.exists() {
+        Some(backend_path)
+    } else {
+        None
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     // Initialize logging to both console and file
@@ -104,23 +115,62 @@ pub fn run() {
         eprintln!("Failed to initialize database: {}", e);
     }
 
-    // Initialize OpenVINO
+    // Initialize OpenVINO library path
     let openvino_ok = init_openvino();
 
-    // Initialize engine and load model
-    let mut engine = engine::ParakeetEngine::new();
+    // Get model base path
+    let model_base_path = get_model_base_path().unwrap_or_else(|| PathBuf::from("model"));
+    info!("Model base path: {:?}", model_base_path);
 
-    if openvino_ok {
-        if let Some(model_path) = get_model_path() {
-            info!("Found model at {:?}", model_path);
-            if let Err(e) = engine.load_model(&model_path) {
-                warn!("Failed to load model: {}. Using mock transcription.", e);
+    // Determine which backend to use
+    let (backend, engine_loaded) = if openvino_ok {
+        if let Some(model_path) = get_model_path(engine::EngineBackend::OpenVINO) {
+            info!("Found OpenVINO model at {:?}", model_path);
+            let mut engine = engine::DynamicEngine::new(engine::EngineBackend::OpenVINO);
+            match engine.load_model(&model_path) {
+                Ok(_) => {
+                    info!("OpenVINO engine loaded successfully");
+                    (engine, true)
+                }
+                Err(e) => {
+                    warn!("Failed to load OpenVINO model: {}", e);
+                    // Try ONNX Runtime as fallback
+                    try_load_onnx_runtime()
+                }
             }
         } else {
-            warn!("Model not found. Using mock transcription.");
+            info!("No OpenVINO model found in model/openvino/");
+            try_load_onnx_runtime()
         }
     } else {
-        warn!("OpenVINO not available. Using mock transcription.");
+        info!("OpenVINO not available, trying ONNX Runtime");
+        try_load_onnx_runtime()
+    };
+
+    fn try_load_onnx_runtime() -> (engine::DynamicEngine, bool) {
+        if let Some(onnx_model_path) = get_model_path(engine::EngineBackend::OnnxRuntime) {
+            info!("Trying ONNX Runtime backend from {:?}", onnx_model_path);
+            let mut engine = engine::DynamicEngine::new(engine::EngineBackend::OnnxRuntime);
+            match engine.load_model(&onnx_model_path) {
+                Ok(_) => {
+                    info!("ONNX Runtime engine loaded successfully");
+                    (engine, true)
+                }
+                Err(e) => {
+                    warn!("Failed to load ONNX Runtime model: {}", e);
+                    (engine::DynamicEngine::new(engine::EngineBackend::OpenVINO), false)
+                }
+            }
+        } else {
+            info!("No ONNX Runtime model found in model/onnxruntime/");
+            (engine::DynamicEngine::new(engine::EngineBackend::OpenVINO), false)
+        }
+    }
+
+    if !engine_loaded {
+        warn!("No model loaded. Using mock transcription.");
+    } else {
+        info!("Using {} backend", backend.name());
     }
 
     tauri::Builder::default()
@@ -130,7 +180,8 @@ pub fn run() {
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .plugin(tauri_plugin_clipboard_manager::init())
         .manage(AudioState(audio::AudioCapture::new()))
-        .manage(EngineState(Mutex::new(engine)))
+        .manage(EngineState(Mutex::new(backend)))
+        .manage(ModelPathState(model_base_path))
         .invoke_handler(tauri::generate_handler![
             // Audio commands
             commands::list_audio_devices,
@@ -143,6 +194,9 @@ pub fn run() {
             // Transcription commands
             commands::transcribe_file,
             commands::get_transcription,
+            // Engine commands
+            commands::switch_engine_backend,
+            commands::get_engine_backend,
             // History commands
             commands::list_transcriptions,
             commands::delete_transcription,
