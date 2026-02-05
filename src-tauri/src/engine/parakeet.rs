@@ -789,6 +789,52 @@ impl ParakeetEngine {
             if token == BLANK_TOKEN {
                 // Blank: avancer dans le temps
                 t += duration as usize;
+
+                // OPTIMIZATION: Inner loop for consecutive blanks
+                // Since blank doesn't update decoder state, we can reuse dec_out
+                // and just run joint network with new encoder frames
+                // (Same optimization as FluidAudio TdtDecoderV3.swift)
+                while t < encoder_time && iterations < max_iterations {
+                    iterations += 1;
+
+                    // Extract next encoder frame
+                    for i in 0..ENCODER_OUTPUT_DIM {
+                        encoder_frame[i] = encoder_output[i * MAX_ENCODER_TIME + t];
+                    }
+
+                    // Run joint with same decoder output (state unchanged after blank)
+                    let inner_logits = self.run_joint_step(
+                        &mut joint_request,
+                        &encoder_frame,
+                        &dec_out,
+                    )?;
+
+                    let (inner_token, inner_duration) = self.decode_tdt_output(
+                        &inner_logits,
+                        config.temperature,
+                        config.blank_penalty,
+                    );
+
+                    if inner_token == BLANK_TOKEN {
+                        // Still blank, keep advancing
+                        t += inner_duration as usize;
+                    } else {
+                        // Non-blank token found, emit it and exit inner loop
+                        tokens.push(inner_token);
+                        last_token = inner_token as i64;
+                        // Need to update decoder state for this new token
+                        let (_, inner_h, inner_c) = self.run_decoder_step(
+                            &mut decoder_request,
+                            inner_token as i64,
+                            &h_state,
+                            &c_state,
+                        )?;
+                        h_state = inner_h;
+                        c_state = inner_c;
+                        t += inner_duration as usize;
+                        break;
+                    }
+                }
             } else {
                 // Token émis
                 tokens.push(token);
@@ -936,6 +982,7 @@ impl ParakeetEngine {
         }
 
         // Les NUM_DURATION_CLASSES derniers sont pour les durées
+        // Duration bins are [0, 1, 2, 3, 4] - index IS the duration value
         let duration_logits = &logits[VOCAB_SIZE..VOCAB_SIZE + NUM_DURATION_CLASSES];
         let mut max_dur = 0u32;
         let mut max_dur_val = duration_logits[0] / temp;
@@ -947,8 +994,15 @@ impl ParakeetEngine {
             }
         }
 
-        // La durée est 1-indexée
-        let duration = max_dur + 1;
+        // Duration bin index IS the duration value (0-4)
+        let mut duration = max_dur;
+
+        // CRITICAL: Protection against infinite loop
+        // If blank token and duration=0, force duration to 1 to advance time
+        // (Same protection as FluidAudio TdtDecoderV3.swift)
+        if max_token == BLANK_TOKEN && duration == 0 {
+            duration = 1;
+        }
 
         (max_token, duration)
     }
@@ -983,6 +1037,8 @@ impl ParakeetEngine {
     }
 
     /// Get best duration from logits
+    /// Returns raw duration bin value [0, 1, 2, 3, 4]
+    /// Caller must handle duration=0 + blank protection
     fn get_best_duration(&self, logits: &[f32], temperature: f32) -> u32 {
         let temp = if temperature > 0.0 { temperature } else { 1.0 };
         let duration_logits = &logits[VOCAB_SIZE..VOCAB_SIZE + NUM_DURATION_CLASSES];
@@ -996,7 +1052,7 @@ impl ParakeetEngine {
                 max_dur = i as u32;
             }
         }
-        max_dur + 1 // Duration is 1-indexed
+        max_dur // Duration bin index IS the duration value
     }
 
     /// TDT beam search decoding
@@ -1125,7 +1181,7 @@ impl ParakeetEngine {
 
                 // Get top-k tokens
                 let top_k = self.get_top_k_tokens(&logits, beam_width, temperature, config.blank_penalty);
-                let duration = self.get_best_duration(&logits, temperature);
+                let raw_duration = self.get_best_duration(&logits, temperature);
 
                 // Expand beam with top-k tokens
                 for (token, log_prob) in top_k {
@@ -1140,6 +1196,8 @@ impl ParakeetEngine {
 
                     if token == BLANK_TOKEN {
                         // Blank: advance time, keep states
+                        // CRITICAL: If duration=0 for blank, force to 1 to avoid infinite loop
+                        let duration = if raw_duration == 0 { 1 } else { raw_duration };
                         new_beam.current_time += duration as usize;
                     } else {
                         // Token emitted: update states and advance time
@@ -1147,7 +1205,9 @@ impl ParakeetEngine {
                         new_beam.last_token = token as i64;
                         new_beam.h_state = new_h.clone();
                         new_beam.c_state = new_c.clone();
-                        new_beam.current_time += duration as usize;
+                        // For non-blank tokens, duration=0 means "don't advance time"
+                        // This allows multiple tokens at the same timestep
+                        new_beam.current_time += raw_duration as usize;
                     }
 
                     new_beams.push(new_beam);
