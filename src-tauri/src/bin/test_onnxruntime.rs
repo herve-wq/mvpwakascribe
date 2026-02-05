@@ -65,26 +65,55 @@ fn main() {
         samples
     };
 
-    // Test multiple configurations
-    let configs = [
-        ("Default (temp=1.0, blank=6.0)", DecodingConfig::default()),
-        ("Higher blank penalty (temp=1.0, blank=8.0)", DecodingConfig::default().with_blank_penalty(8.0)),
-        ("Higher blank penalty (temp=1.0, blank=10.0)", DecodingConfig::default().with_blank_penalty(10.0)),
-        ("Temp 0.8 + blank 7.0", DecodingConfig::default().with_temperature(0.8).with_blank_penalty(7.0)),
-        ("Temp 0.9 + blank 6.5", DecodingConfig::default().with_temperature(0.9).with_blank_penalty(6.5)),
+    println!("\n=== TARGET (CoreML FluidAudio): ===");
+    println!("Je fais un premier test. 1, 2, 3, 4, 5, 6. Je vais faire un deuxième test. 7, 8, 9, 10, 11, 12. Je fais un troisième test. 13, 14, 15, 16. Fin des tests.\n");
+
+    // Test configurations (max 10 tests) - Round 2: Fine-tuning around beam=5, temp=0.7
+    let configs: Vec<(&str, DecodingConfig, TranscriptionLanguage)> = vec![
+        // Test 1: Best from round 1
+        ("Test 1: Beam=5 + temp=0.7 + blank=6 Auto",
+         DecodingConfig::beam_search(5).with_temperature(0.7), TranscriptionLanguage::Auto),
+        // Test 2: Same but French
+        ("Test 2: Beam=5 + temp=0.7 + blank=6 French",
+         DecodingConfig::beam_search(5).with_temperature(0.7), TranscriptionLanguage::French),
+        // Test 3: Higher beam
+        ("Test 3: Beam=8 + temp=0.7 + blank=6 Auto",
+         DecodingConfig::beam_search(8).with_temperature(0.7), TranscriptionLanguage::Auto),
+        // Test 4: Beam=5 + higher blank
+        ("Test 4: Beam=5 + temp=0.7 + blank=8 Auto",
+         DecodingConfig::beam_search(5).with_temperature(0.7).with_blank_penalty(8.0), TranscriptionLanguage::Auto),
+        // Test 5: Beam=5 + temp=0.8
+        ("Test 5: Beam=5 + temp=0.8 + blank=6 Auto",
+         DecodingConfig::beam_search(5).with_temperature(0.8), TranscriptionLanguage::Auto),
+        // Test 6: Beam=5 + temp=0.6
+        ("Test 6: Beam=5 + temp=0.6 + blank=6 Auto",
+         DecodingConfig::beam_search(5).with_temperature(0.6), TranscriptionLanguage::Auto),
+        // Test 7: Beam=5 + temp=0.7 + blank=7
+        ("Test 7: Beam=5 + temp=0.7 + blank=7 Auto",
+         DecodingConfig::beam_search(5).with_temperature(0.7).with_blank_penalty(7.0), TranscriptionLanguage::Auto),
+        // Test 8: Beam=10 + temp=0.7
+        ("Test 8: Beam=10 + temp=0.7 + blank=6 Auto",
+         DecodingConfig::beam_search(10).with_temperature(0.7), TranscriptionLanguage::Auto),
+        // Test 9: Beam=5 + temp=0.75 + blank=7 French
+        ("Test 9: Beam=5 + temp=0.75 + blank=7 French",
+         DecodingConfig::beam_search(5).with_temperature(0.75).with_blank_penalty(7.0), TranscriptionLanguage::French),
+        // Test 10: Beam=7 + temp=0.7 + blank=7 Auto
+        ("Test 10: Beam=7 + temp=0.7 + blank=7 Auto",
+         DecodingConfig::beam_search(7).with_temperature(0.7).with_blank_penalty(7.0), TranscriptionLanguage::Auto),
     ];
 
-    for (name, config) in &configs {
-        println!("\n=== Testing: {} ===", name);
-        println!("Config: beam_width={}, temperature={:.2}, blank_penalty={:.1}",
-            config.beam_width, config.temperature, config.blank_penalty);
+    for (name, config, language) in &configs {
+        println!("=== {} ===", name);
 
-        match engine.run_inference(&samples, TranscriptionLanguage::French, config) {
+        let start = std::time::Instant::now();
+        match engine.run_inference(&samples, language.clone(), config) {
             Ok(text) => {
+                let elapsed = start.elapsed();
                 println!("Result: {}", text);
+                println!("Time: {:?}\n", elapsed);
             }
             Err(e) => {
-                eprintln!("✗ Inference failed: {}", e);
+                eprintln!("✗ Inference failed: {}\n", e);
             }
         }
     }

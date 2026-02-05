@@ -20,6 +20,10 @@ use tracing::{debug, info, warn};
 /// Token spécial pour le blank (pas de sortie)
 const BLANK_TOKEN: u32 = 8192;
 
+/// Tokens de contrôle pour le conditionnement du décodeur
+const TOKEN_START_OF_TRANSCRIPT: i32 = 4;   // <|startoftranscript|>
+const TOKEN_NO_PREDICT_LANG: i32 = 23;      // <|nopredict_lang|>
+
 /// Nombre de classes de durée TDT (1, 2, 3, 4, 5 frames)
 const NUM_DURATION_CLASSES: usize = 5;
 
@@ -289,7 +293,7 @@ impl OnnxRuntimeEngine {
         encoder_data: &[f32],
         encoder_time: usize,
         valid_time: usize,
-        _language: TranscriptionLanguage,
+        language: TranscriptionLanguage,
         config: &DecodingConfig,
     ) -> Result<Vec<u32>> {
         let mut states = LSTMStates::zeros();
@@ -299,9 +303,51 @@ impl OnnxRuntimeEngine {
         const MAX_ITERATIONS: usize = 1000;
 
         info!(
-            "TDT decode config: beam=1, temp={:.2}, blank_penalty={:.1}",
-            config.temperature, config.blank_penalty
+            "TDT decode config: beam=1, temp={:.2}, blank_penalty={:.1}, language={:?}",
+            config.temperature, config.blank_penalty, language
         );
+
+        // If a language is forced, condition the decoder with the token sequence
+        // Sequence: <|startoftranscript|> → <|nopredict_lang|> → <|lang|>
+        if let Some(lang_token) = language.token_id() {
+            info!(
+                "Forcing language with token sequence: startoftranscript(4) → nopredict_lang(23) → {}({})",
+                language.display_name(),
+                lang_token
+            );
+
+            // Step 1: <|startoftranscript|> (token 4)
+            let _ = self.run_decoder_joint(
+                encoder_data,
+                encoder_time,
+                0, // Use first frame for conditioning
+                TOKEN_START_OF_TRANSCRIPT,
+                &mut states,
+            )?;
+            debug!("Decoder step 1: <|startoftranscript|>");
+
+            // Step 2: <|nopredict_lang|> (token 23)
+            let _ = self.run_decoder_joint(
+                encoder_data,
+                encoder_time,
+                0,
+                TOKEN_NO_PREDICT_LANG,
+                &mut states,
+            )?;
+            debug!("Decoder step 2: <|nopredict_lang|>");
+
+            // Step 3: Language token
+            let _ = self.run_decoder_joint(
+                encoder_data,
+                encoder_time,
+                0,
+                lang_token as i32,
+                &mut states,
+            )?;
+            debug!("Decoder step 3: <|{}|>", language.display_name());
+
+            info!("Decoder conditioned with full language sequence");
+        }
 
         while t < valid_time && iterations < MAX_ITERATIONS {
             iterations += 1;
@@ -417,13 +463,13 @@ impl ASREngine for OnnxRuntimeEngine {
         self.mel_session = Some(Mutex::new(mel_session));
         info!("Mel spectrogram model loaded");
 
-        // Load encoder model (prefer int8 for speed)
-        let encoder_path = if model_dir.join("encoder-model.int8.onnx").exists() {
-            info!("Loading encoder model (encoder-model.int8.onnx)...");
-            model_dir.join("encoder-model.int8.onnx")
-        } else {
-            info!("Loading encoder model (encoder-model.onnx)...");
+        // Load encoder model (prefer float32 for quality)
+        let encoder_path = if model_dir.join("encoder-model.onnx").exists() {
+            info!("Loading encoder model (encoder-model.onnx - float32)...");
             model_dir.join("encoder-model.onnx")
+        } else {
+            info!("Loading encoder model (encoder-model.int8.onnx - quantized)...");
+            model_dir.join("encoder-model.int8.onnx")
         };
         let encoder_session = Session::builder()
             .map_err(|e| AppError::Transcription(format!("Failed to create session builder: {}", e)))?
@@ -594,15 +640,15 @@ impl OnnxRuntimeEngine {
         encoder_data: &[f32],
         encoder_time: usize,
         valid_time: usize,
-        _language: TranscriptionLanguage,
+        language: TranscriptionLanguage,
         config: &DecodingConfig,
     ) -> Result<Vec<u32>> {
         let beam_width = config.beam_width.max(1);
         let temperature = config.temperature;
 
         info!(
-            "Starting beam search decode: beam_width={}, temp={:.2}, blank_penalty={:.1}",
-            beam_width, temperature, config.blank_penalty
+            "Starting beam search decode: beam_width={}, temp={:.2}, blank_penalty={:.1}, language={:?}",
+            beam_width, temperature, config.blank_penalty, language
         );
 
         // Initialize beams with a single hypothesis
@@ -614,6 +660,56 @@ impl OnnxRuntimeEngine {
             last_token: BLANK_TOKEN as i32,
             current_time: 0,
         }];
+
+        // If language is forced, condition all beams
+        if let Some(lang_token) = language.token_id() {
+            info!(
+                "Conditioning beams with language: {} (token {})",
+                language.display_name(),
+                lang_token
+            );
+
+            // Create mutable states for conditioning
+            let mut states = LSTMStates {
+                h: beams[0].h_state.clone(),
+                c: beams[0].c_state.clone(),
+            };
+
+            // Step 1: <|startoftranscript|>
+            let _ = self.run_decoder_joint(
+                encoder_data,
+                encoder_time,
+                0,
+                TOKEN_START_OF_TRANSCRIPT,
+                &mut states,
+            )?;
+
+            // Step 2: <|nopredict_lang|>
+            let _ = self.run_decoder_joint(
+                encoder_data,
+                encoder_time,
+                0,
+                TOKEN_NO_PREDICT_LANG,
+                &mut states,
+            )?;
+
+            // Step 3: Language token
+            let _ = self.run_decoder_joint(
+                encoder_data,
+                encoder_time,
+                0,
+                lang_token as i32,
+                &mut states,
+            )?;
+
+            // Update the initial beam with conditioned states
+            beams[0].h_state = states.h;
+            beams[0].c_state = states.c;
+            // Reset last_token to BLANK for normal decoding
+            beams[0].last_token = BLANK_TOKEN as i32;
+
+            info!("Beams conditioned with full language sequence");
+        }
 
         // Safety limit
         let max_iterations = valid_time * 10;

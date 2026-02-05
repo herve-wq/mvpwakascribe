@@ -4,7 +4,10 @@ import type { TranscriptionLanguage } from "../../lib/types";
 
 export function TranscriptionSettings() {
   const { settings, setSettings } = useAppStore();
-  const { transcription } = settings;
+  const { transcription, engineBackend } = settings;
+
+  // CoreML doesn't support beam search
+  const isCoreML = engineBackend === "coreml";
 
   const handleLanguageChange = (language: TranscriptionLanguage) => {
     setSettings({
@@ -13,6 +16,8 @@ export function TranscriptionSettings() {
   };
 
   const handleBeamWidthChange = (beamWidth: number) => {
+    // Ignore beam width changes for CoreML (always greedy)
+    if (isCoreML) return;
     setSettings({
       transcription: { ...transcription, beamWidth },
     });
@@ -31,7 +36,8 @@ export function TranscriptionSettings() {
   };
 
   // Decode mode: Simple (greedy) vs Precise (beam search)
-  const isBeamSearch = transcription.beamWidth > 1;
+  // CoreML only supports greedy decoding
+  const isBeamSearch = !isCoreML && transcription.beamWidth > 1;
 
   return (
     <div className="space-y-4">
@@ -100,9 +106,11 @@ export function TranscriptionSettings() {
           </button>
         </div>
         <p className="text-xs text-[var(--color-text-muted)]">
-          {isBeamSearch
-            ? "Beam search (beam=5): Plus lent mais meilleure qualite"
-            : "Greedy (beam=1): Rapide, bonne qualite"}
+          {isCoreML
+            ? "CoreML: Greedy uniquement (beam search non supporte)"
+            : isBeamSearch
+              ? "Beam search (beam=5): Plus lent mais meilleure qualite"
+              : "Greedy (beam=1): Rapide, bonne qualite"}
         </p>
       </div>
 
@@ -188,7 +196,7 @@ export function TranscriptionSettings() {
         <div className="flex justify-between">
           <span className="text-[var(--color-text-muted)]">Config actuelle</span>
           <span className="text-[var(--color-text-primary)] font-mono">
-            beam={transcription.beamWidth}, temp={transcription.temperature.toFixed(1)}, blank={transcription.blankPenalty.toFixed(1)}
+            beam={isCoreML ? 1 : transcription.beamWidth}, temp={transcription.temperature.toFixed(1)}, blank={transcription.blankPenalty.toFixed(1)}
           </span>
         </div>
       </div>

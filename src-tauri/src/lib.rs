@@ -115,56 +115,91 @@ pub fn run() {
         eprintln!("Failed to initialize database: {}", e);
     }
 
-    // Initialize OpenVINO library path
+    // Read saved engine backend preference from database
+    let saved_backend = storage::with_db(|conn| storage::get_settings(conn))
+        .ok()
+        .map(|s| s.engine_backend)
+        .unwrap_or_else(|| "openvino".to_string());
+    info!("Saved engine backend preference: {}", saved_backend);
+
+    // Initialize OpenVINO library path (needed if we want to use OpenVINO)
     let openvino_ok = init_openvino();
 
     // Get model base path
     let model_base_path = get_model_base_path().unwrap_or_else(|| PathBuf::from("model"));
     info!("Model base path: {:?}", model_base_path);
 
-    // Determine which backend to use
-    let (backend, engine_loaded) = if openvino_ok {
-        if let Some(model_path) = get_model_path(engine::EngineBackend::OpenVINO) {
-            info!("Found OpenVINO model at {:?}", model_path);
-            let mut engine = engine::DynamicEngine::new(engine::EngineBackend::OpenVINO);
-            match engine.load_model(&model_path) {
-                Ok(_) => {
-                    info!("OpenVINO engine loaded successfully");
-                    (engine, true)
-                }
-                Err(e) => {
-                    warn!("Failed to load OpenVINO model: {}", e);
-                    // Try ONNX Runtime as fallback
-                    try_load_onnx_runtime()
-                }
-            }
-        } else {
-            info!("No OpenVINO model found in model/openvino/");
-            try_load_onnx_runtime()
+    // Determine which backend to use based on saved preference
+    let (backend, engine_loaded) = match saved_backend.as_str() {
+        "onnxruntime" => {
+            info!("Loading saved preference: ONNX Runtime");
+            try_load_backend(engine::EngineBackend::OnnxRuntime, openvino_ok)
         }
-    } else {
-        info!("OpenVINO not available, trying ONNX Runtime");
-        try_load_onnx_runtime()
+        #[cfg(target_os = "macos")]
+        "coreml" => {
+            info!("Loading saved preference: CoreML");
+            try_load_backend(engine::EngineBackend::CoreML, openvino_ok)
+        }
+        _ => {
+            // Default to OpenVINO
+            info!("Loading saved preference: OpenVINO");
+            try_load_backend(engine::EngineBackend::OpenVINO, openvino_ok)
+        }
     };
 
-    fn try_load_onnx_runtime() -> (engine::DynamicEngine, bool) {
-        if let Some(onnx_model_path) = get_model_path(engine::EngineBackend::OnnxRuntime) {
-            info!("Trying ONNX Runtime backend from {:?}", onnx_model_path);
-            let mut engine = engine::DynamicEngine::new(engine::EngineBackend::OnnxRuntime);
-            match engine.load_model(&onnx_model_path) {
-                Ok(_) => {
-                    info!("ONNX Runtime engine loaded successfully");
-                    (engine, true)
-                }
-                Err(e) => {
-                    warn!("Failed to load ONNX Runtime model: {}", e);
-                    (engine::DynamicEngine::new(engine::EngineBackend::OpenVINO), false)
+    fn try_load_backend(preferred: engine::EngineBackend, openvino_ok: bool) -> (engine::DynamicEngine, bool) {
+        // Try preferred backend first
+        if let Some(model_path) = get_model_path(preferred) {
+            // For OpenVINO, check if library is available
+            if matches!(preferred, engine::EngineBackend::OpenVINO) && !openvino_ok {
+                info!("OpenVINO library not available, trying fallback");
+            } else {
+                info!("Found {} model at {:?}", preferred.display_name(), model_path);
+                let mut engine = engine::DynamicEngine::new(preferred);
+                match engine.load_model(&model_path) {
+                    Ok(_) => {
+                        info!("{} engine loaded successfully", preferred.display_name());
+                        return (engine, true);
+                    }
+                    Err(e) => {
+                        warn!("Failed to load {} model: {}", preferred.display_name(), e);
+                    }
                 }
             }
         } else {
-            info!("No ONNX Runtime model found in model/onnxruntime/");
-            (engine::DynamicEngine::new(engine::EngineBackend::OpenVINO), false)
+            info!("No {} model found", preferred.display_name());
         }
+
+        // Fallback: try other backends
+        let fallbacks = [
+            engine::EngineBackend::OnnxRuntime,
+            engine::EngineBackend::OpenVINO,
+        ];
+
+        for fallback in fallbacks {
+            if fallback == preferred {
+                continue;
+            }
+            if matches!(fallback, engine::EngineBackend::OpenVINO) && !openvino_ok {
+                continue;
+            }
+            if let Some(model_path) = get_model_path(fallback) {
+                info!("Trying fallback: {} from {:?}", fallback.display_name(), model_path);
+                let mut engine = engine::DynamicEngine::new(fallback);
+                match engine.load_model(&model_path) {
+                    Ok(_) => {
+                        info!("{} engine loaded successfully (fallback)", fallback.display_name());
+                        return (engine, true);
+                    }
+                    Err(e) => {
+                        warn!("Failed to load {} model: {}", fallback.display_name(), e);
+                    }
+                }
+            }
+        }
+
+        // Nothing worked
+        (engine::DynamicEngine::new(engine::EngineBackend::OpenVINO), false)
     }
 
     if !engine_loaded {
@@ -200,6 +235,7 @@ pub fn run() {
             // History commands
             commands::list_transcriptions,
             commands::delete_transcription,
+            commands::delete_all_transcriptions,
             commands::update_transcription_text,
             // Settings commands
             commands::get_settings,

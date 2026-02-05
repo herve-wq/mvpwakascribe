@@ -1,137 +1,270 @@
-# CLAUDE.md
+# WakaScribe - Project Documentation
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
-
-## Project Overview
-
-WakaScribe is an offline speech-to-text desktop application for macOS Intel, using NVIDIA Parakeet TDT model. Target: MacBook Pro Intel (2019).
+Offline speech-to-text desktop application for macOS using NVIDIA Parakeet TDT model.
 
 ## Tech Stack
 
-- **Framework**: Tauri 2.x (Rust backend + web frontend)
-- **Frontend**: React 19 + TypeScript + Tailwind CSS v4
-- **Backend**: Rust
-- **STT Engine**: Parakeet TDT via openvino
+- **Framework**: Tauri 2.x (Rust backend + React frontend)
+- **Frontend**: React 19 + TypeScript 5.8 + Tailwind CSS v4 + Zustand
+- **Backend**: Rust 2021 edition
+- **STT Engines**: OpenVINO (primary), ONNX Runtime, CoreML
 - **Database**: SQLite via rusqlite
-- **Audio**: cpal (Rust)
+- **Audio**: cpal + rubato (resampling)
 
 ## Prerequisites
 
-### OpenVINO
-Install OpenVINO via Homebrew (required for ONNX model inference):
 ```bash
+# OpenVINO (required for primary inference backend)
 brew install openvino
 ```
 
 ## Build Commands
 
 ```bash
-# Development (runs both frontend and backend)
-npm run tauri:dev
-
-# Build production DMG
-npm run tauri:build
-
-# Frontend only
-npm run dev
-npm run build
-
-# Check Rust code
-cargo check
+npm run tauri:dev      # Development (frontend + backend)
+npm run tauri:build    # Production DMG
+npm run dev            # Frontend only
+cargo check            # Check Rust code
 ```
 
-Note: The `tauri:dev` and `tauri:build` scripts automatically set `OPENVINO_LIB_PATH=/usr/local/lib` for proper library loading.
+Note: Scripts automatically set `OPENVINO_LIB_PATH=/usr/local/lib`.
 
 ## Project Structure
 
 ```
 wakascribe/
 ├── src/                          # React frontend
+│   ├── App.tsx                   # Main app, mode switching
+│   ├── index.css                 # Tailwind v4 theme
 │   ├── components/
-│   │   ├── Layout.tsx           # Main layout with sidebar panels
-│   │   ├── TitleBar.tsx         # Custom window title bar
-│   │   ├── Recorder/            # Dictation mode components
-│   │   ├── FileTranscribe/      # File transcription components
-│   │   ├── Editor/              # Transcription editor
-│   │   ├── History/             # History panel
-│   │   └── Settings/            # Settings panel
-│   ├── hooks/                   # React hooks (useRecording, useTheme, etc.)
-│   ├── stores/appStore.ts       # Zustand state management
+│   │   ├── Layout.tsx            # Main layout with sidebar
+│   │   ├── TitleBar.tsx          # Custom window titlebar
+│   │   ├── Recorder/             # Dictation mode
+│   │   │   ├── index.tsx
+│   │   │   ├── WaveformDisplay.tsx
+│   │   │   ├── RecordingControls.tsx
+│   │   │   └── ConfidenceIndicator.tsx
+│   │   ├── FileTranscribe/       # File transcription
+│   │   │   ├── index.tsx
+│   │   │   ├── DropZone.tsx
+│   │   │   └── ProgressBar.tsx
+│   │   ├── Editor/               # Transcription editor
+│   │   │   ├── index.tsx
+│   │   │   ├── SegmentList.tsx
+│   │   │   └── ExportMenu.tsx
+│   │   ├── History/              # History panel
+│   │   │   ├── index.tsx
+│   │   │   ├── SearchBar.tsx
+│   │   │   └── TranscriptionCard.tsx
+│   │   └── Settings/             # Settings panels
+│   │       ├── index.tsx
+│   │       ├── AppearanceSettings.tsx
+│   │       ├── AudioSettings.tsx
+│   │       ├── EngineSettings.tsx
+│   │       ├── TranscriptionSettings.tsx
+│   │       └── ShortcutSettings.tsx
+│   ├── hooks/
+│   │   ├── useRecording.ts       # Recording state/control
+│   │   ├── useTranscription.ts   # Transcription operations
+│   │   ├── useAudioDevices.ts    # Device enumeration
+│   │   ├── useSettings.ts        # Settings management
+│   │   └── useTheme.ts           # Theme switching
+│   ├── stores/
+│   │   └── appStore.ts           # Zustand global state
 │   └── lib/
-│       ├── tauri.ts             # Tauri command wrappers
-│       └── types.ts             # TypeScript types
-├── src-tauri/                   # Rust backend
+│       ├── types.ts              # TypeScript types
+│       └── tauri.ts              # Tauri command wrappers
+│
+├── src-tauri/                    # Rust backend
 │   ├── src/
-│   │   ├── lib.rs               # Main entry, plugin setup
-│   │   ├── commands/            # Tauri command handlers
-│   │   ├── audio/               # Audio capture via cpal (threaded)
-│   │   ├── engine/              # Parakeet STT inference
-│   │   │   ├── parakeet.rs      # ONNX model loading and inference via tract
-│   │   │   ├── mel.rs           # Mel spectrogram computation
-│   │   │   └── decoder.rs       # TDT token decoding
-│   │   ├── storage/             # SQLite database
-│   │   └── export/              # TXT and DOCX export
-│   └── migrations/001_init.sql  # Database schema
-├── model/                        # ONNX model files
-│   ├── encoder-model.onnx       # Conformer encoder
-│   ├── decoder_joint-model.onnx # TDT decoder
-│   ├── config.json              # Model configuration
-│   └── vocab.txt                # Vocabulary (8193 tokens)
-└── PRD_WakaScribe_MVP.md        # Product requirements
+│   │   ├── lib.rs                # Entry, plugin setup, engine init
+│   │   ├── main.rs               # Binary entry
+│   │   ├── error.rs              # AppError enum
+│   │   ├── commands/
+│   │   │   ├── mod.rs
+│   │   │   ├── audio.rs          # Audio device/recording
+│   │   │   ├── transcription.rs  # Transcription commands
+│   │   │   ├── history.rs        # History CRUD
+│   │   │   ├── settings.rs       # Settings persistence
+│   │   │   ├── export.rs         # TXT/DOCX export
+│   │   │   └── test_transcription.rs
+│   │   ├── audio/
+│   │   │   ├── mod.rs
+│   │   │   ├── capture.rs        # Live capture (cpal, threaded)
+│   │   │   ├── processor.rs      # Resampling, normalization
+│   │   │   ├── chunker.rs        # Audio chunking
+│   │   │   └── vad.rs            # Voice Activity Detection
+│   │   ├── engine/
+│   │   │   ├── mod.rs            # DynamicEngine trait
+│   │   │   ├── parakeet.rs       # OpenVINO backend
+│   │   │   ├── onnxruntime.rs    # ONNX Runtime backend
+│   │   │   ├── coreml.rs         # CoreML backend (macOS)
+│   │   │   ├── config.rs         # DecodingConfig
+│   │   │   ├── mel.rs            # Mel spectrogram
+│   │   │   ├── decoder.rs        # TDT beam search decoder
+│   │   │   └── merger.rs         # Segment merging
+│   │   ├── storage/
+│   │   │   ├── mod.rs
+│   │   │   ├── database.rs       # DB init/connection
+│   │   │   ├── models.rs         # Data models
+│   │   │   └── queries.rs        # CRUD operations
+│   │   └── export/
+│   │       ├── mod.rs
+│   │       ├── txt.rs
+│   │       └── docx.rs
+│   ├── migrations/
+│   │   └── 001_init.sql          # DB schema
+│   ├── Cargo.toml
+│   └── tauri.conf.json
+│
+├── model/                        # ML models by backend
+│   ├── openvino/
+│   │   ├── parakeet_encoder.xml/bin
+│   │   ├── parakeet_decoder.xml/bin
+│   │   ├── parakeet_joint.xml/bin
+│   │   ├── parakeet_melspectogram.xml/bin
+│   │   └── parakeet_v3_vocab.json
+│   ├── onnxruntime/
+│   │   ├── encoder-model.int8.onnx
+│   │   ├── decoder_joint-model.onnx
+│   │   ├── nemo128.onnx
+│   │   ├── vocab.txt
+│   │   └── config.json
+│   └── coreml/
+│       ├── Encoder.mlmodelc/
+│       ├── Decoder.mlmodelc/
+│       ├── Preprocessor.mlmodelc/
+│       ├── MelEncoder.mlmodelc/
+│       └── parakeet_v3_vocab.json
+│
+├── package.json
+├── vite.config.ts
+├── tsconfig.json
+└── postcss.config.js
 ```
 
-## Key Implementation Details
+## Tauri Commands
 
-### ONNX Inference Engine (src-tauri/src/engine/)
+**Audio:**
+- `list_audio_devices`, `start_recording`, `stop_recording`
+- `pause_recording`, `resume_recording`, `get_audio_level`
 
-Uses OpenVINO for ONNX model inference (requires Homebrew openvino package):
-- `parakeet.rs`: Loads encoder and decoder ONNX models via OpenVINO, runs inference pipeline
-- `mel.rs`: Computes 128-mel spectrogram from 16kHz audio (512 FFT, 160 hop)
-- `decoder.rs`: TDT decoder converts token IDs to text with timestamps
-
-Model configuration (from config.json):
-- `features_size`: 128 mel features
-- `subsampling_factor`: 8 (Conformer architecture)
-
-### Audio Capture (src-tauri/src/audio/capture.rs)
-- Uses a dedicated thread to handle cpal::Stream (not Send-safe)
-- Commands sent via mpsc channel to audio thread
-- AudioCapture struct is Send+Sync safe for Tauri state
-
-### Tauri Commands
-Commands are defined in `src-tauri/src/commands/` and exposed in `lib.rs`:
-- `list_audio_devices`, `start_recording`, `stop_recording`, `pause_recording`, `resume_recording`
+**Transcription:**
 - `transcribe_file`, `get_transcription`
+
+**History:**
 - `list_transcriptions`, `delete_transcription`, `update_transcription_text`
+
+**Settings:**
 - `get_settings`, `update_settings`
+- `switch_engine_backend`, `get_engine_backend`
+
+**Export:**
 - `export_to_txt`, `export_to_docx`, `copy_to_clipboard`
 
-### Database
-SQLite database stored at `~/Library/Application Support/com.wakascribe.desktop/wakascribe.db`
+## Database Schema
 
-## Model Files
+SQLite at `~/Library/Application Support/com.wakascribe.app/wakascribe.db`
 
-The ONNX model files should be placed in the `model/` directory:
-- `encoder-model.onnx` - NeMo Conformer encoder
-- `encoder-model.onnx.data` - External weights for encoder (large file)
-- `decoder_joint-model.onnx` - TDT joint decoder
-- `vocab.txt` - Vocabulary file
-- `config.json` - Model configuration
+```sql
+-- Transcriptions table
+CREATE TABLE transcriptions (
+  id TEXT PRIMARY KEY,
+  created_at TEXT, updated_at TEXT,
+  source_type TEXT,  -- 'dictation' | 'file'
+  source_name TEXT,
+  duration_ms INTEGER,
+  language TEXT,
+  raw_text TEXT, edited_text TEXT, is_edited INTEGER
+);
 
-## Important Notes
+-- Segments table
+CREATE TABLE segments (
+  id TEXT PRIMARY KEY,
+  transcription_id TEXT,
+  start_ms INTEGER, end_ms INTEGER,
+  text TEXT, confidence REAL
+);
 
-### Tailwind CSS v4
-- Uses CSS-based config in `src/index.css` (no tailwind.config.js)
-- **Critical**: Must exclude binary directories with `@source not` directives to prevent scanning model/ONNX files:
-  ```css
-  @source not "../model";
-  @source not "../src-tauri";
-  ```
+-- Settings table
+CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT);
+```
 
-### Model Loading
-- Model is loaded at app startup in `lib.rs`
-- If model files are missing, app falls back to mock transcription
-- Model path is resolved relative to executable or from bundle Resources
+## Audio Processing Pipeline
 
-### App Identifier
-`com.wakascribe.desktop`
+1. Capture from device (cpal) → 2. Resample to 16kHz (rubato)
+3. Normalize → 4. Mel spectrogram (128 features, 160 hop)
+5. Inference (OpenVINO/ONNX/CoreML) → 6. Beam search decode
+7. Post-process → 8. Store in SQLite → 9. Stream to frontend
+
+## Model Configuration
+
+- **Features**: 128 mel spectral features
+- **Sample rate**: 16kHz
+- **Vocabulary**: 8193 tokens + blank
+- **Max duration**: 15 seconds (240,000 samples)
+
+## Language Support
+
+- Auto-detection (default)
+- Force French: token 71 `<|fr|>`
+- Force English: token 64 `<|en|>`
+
+## Decoding Parameters
+
+- `beam_width`: 1 (greedy) to 5+ (quality)
+- `temperature`: 0.1-1.5
+- `blank_penalty`: 0-15
+
+## Zustand State
+
+```typescript
+{
+  recordingState: 'idle' | 'recording' | 'paused' | 'processing',
+  currentMode: 'dictation' | 'file',
+  currentSegments: Segment[],
+  settings: Settings,
+  transcriptions: Transcription[],
+  audioDevices: AudioDevice[],
+  audioLevel: number
+}
+```
+
+## Key Types
+
+```typescript
+interface Transcription {
+  id: string;
+  created_at: string;
+  source_type: 'dictation' | 'file';
+  source_name: string;
+  duration_ms: number;
+  language: TranscriptionLanguage;
+  segments: Segment[];
+  raw_text: string;
+  edited_text?: string;
+}
+
+interface Segment {
+  id: string;
+  start_ms: number;
+  end_ms: number;
+  text: string;
+  confidence: number;
+}
+
+type EngineBackend = 'openvino' | 'onnxruntime' | 'coreml';
+type TranscriptionLanguage = 'auto' | 'french' | 'english';
+```
+
+## App Identifier
+
+`com.wakascribe.desktop` (bundle) / `com.wakascribe.app` (storage)
+
+## Tailwind CSS v4
+
+Config in `src/index.css` with `@theme` variables. Must exclude binary dirs:
+```css
+@source not "../model";
+@source not "../src-tauri";
+```

@@ -5,6 +5,7 @@ import {
   listTranscriptions,
   getTranscription,
   deleteTranscription as tauriDeleteTranscription,
+  deleteAllTranscriptions as tauriDeleteAllTranscriptions,
   updateTranscriptionText,
   transcribeFile as tauriTranscribeFile,
   exportToTxt,
@@ -81,6 +82,15 @@ export function useTranscription() {
     [transcriptions, setTranscriptions]
   );
 
+  const deleteAllTranscriptions = useCallback(async () => {
+    try {
+      await tauriDeleteAllTranscriptions();
+      setTranscriptions([]);
+    } catch (error) {
+      console.error("Failed to delete all transcriptions:", error);
+    }
+  }, [setTranscriptions]);
+
   const updateText = useCallback(async (id: string, editedText: string) => {
     try {
       await updateTranscriptionText(id, editedText);
@@ -119,6 +129,7 @@ export function useTranscription() {
     getTranscription,
     transcribeFile,
     deleteTranscription,
+    deleteAllTranscriptions,
     updateText,
     exportTxt,
     exportDocx,

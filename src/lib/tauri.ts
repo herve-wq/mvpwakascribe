@@ -64,6 +64,10 @@ export async function deleteTranscription(id: string): Promise<void> {
   return invoke("delete_transcription", { id });
 }
 
+export async function deleteAllTranscriptions(): Promise<void> {
+  return invoke("delete_all_transcriptions");
+}
+
 export async function updateTranscriptionText(
   id: string,
   editedText: string

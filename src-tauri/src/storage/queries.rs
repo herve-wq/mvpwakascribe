@@ -150,6 +150,12 @@ pub fn delete_transcription(conn: &Connection, id: &str) -> Result<()> {
     Ok(())
 }
 
+pub fn delete_all_transcriptions(conn: &Connection) -> Result<()> {
+    conn.execute("DELETE FROM segments", [])?;
+    conn.execute("DELETE FROM transcriptions", [])?;
+    Ok(())
+}
+
 // Settings queries
 
 pub fn get_settings(conn: &Connection) -> Result<Settings> {

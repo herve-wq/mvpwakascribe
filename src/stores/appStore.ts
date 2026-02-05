@@ -111,6 +111,7 @@ export const useAppStore = create<AppState>((set) => ({
   addTranscription: (transcription) =>
     set((state) => ({
       transcriptions: [transcription, ...state.transcriptions],
+      currentSegments: transcription.segments || [],
     })),
 
   toggleSettings: () => set((state) => ({ showSettings: !state.showSettings })),

@@ -44,7 +44,7 @@ function groupByDate(transcriptions: Transcription[]) {
 
 export function History({ onClose, onSelectTranscription }: HistoryProps) {
   const [searchQuery, setSearchQuery] = useState("");
-  const { transcriptions, loadTranscriptions, deleteTranscription } =
+  const { transcriptions, loadTranscriptions, deleteTranscription, deleteAllTranscriptions } =
     useTranscription();
 
   useEffect(() => {
@@ -72,29 +72,59 @@ export function History({ onClose, onSelectTranscription }: HistoryProps) {
     }
   };
 
+  const handleDeleteAll = async () => {
+    if (transcriptions.length === 0) return;
+    if (confirm(`Supprimer tout l'historique (${transcriptions.length} transcriptions) ?`)) {
+      await deleteAllTranscriptions();
+    }
+  };
+
   return (
     <div className="h-full flex flex-col">
       {/* Header */}
       <div className="p-4 border-b border-[var(--color-border)] flex items-center justify-between">
         <h2 className="font-semibold text-[var(--color-text-primary)]">Historique</h2>
-        <button
-          onClick={onClose}
-          className="p-1 rounded hover:bg-[var(--color-bg-tertiary)]"
-        >
-          <svg
-            className="w-5 h-5 text-[var(--color-text-muted)]"
-            fill="none"
-            stroke="currentColor"
-            viewBox="0 0 24 24"
+        <div className="flex items-center gap-2">
+          {transcriptions.length > 0 && (
+            <button
+              onClick={handleDeleteAll}
+              className="p-1 rounded hover:bg-red-500/10 text-[var(--color-text-muted)] hover:text-red-500"
+              title="Supprimer tout l'historique"
+            >
+              <svg
+                className="w-5 h-5"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
+                />
+              </svg>
+            </button>
+          )}
+          <button
+            onClick={onClose}
+            className="p-1 rounded hover:bg-[var(--color-bg-tertiary)]"
           >
-            <path
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              strokeWidth={2}
-              d="M6 18L18 6M6 6l12 12"
-            />
-          </svg>
-        </button>
+            <svg
+              className="w-5 h-5 text-[var(--color-text-muted)]"
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M6 18L18 6M6 6l12 12"
+              />
+            </svg>
+          </button>
+        </div>
       </div>
 
       {/* Search */}

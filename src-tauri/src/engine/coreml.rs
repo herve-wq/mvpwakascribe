@@ -102,19 +102,43 @@ impl CoreMLEngine {
     }
 
     /// Call the sidecar and parse the result
-    fn call_sidecar(&self, audio_path: &Path) -> Result<SidecarResult> {
+    fn call_sidecar(
+        &self,
+        audio_path: &Path,
+        language: TranscriptionLanguage,
+        config: &DecodingConfig,
+    ) -> Result<SidecarResult> {
         let sidecar_path = self.sidecar_path.as_ref()
             .ok_or_else(|| AppError::Transcription("Sidecar not found".to_string()))?;
 
         let model_dir = self.model_dir.as_ref()
             .ok_or_else(|| AppError::Transcription("Model directory not set".to_string()))?;
 
-        debug!("Calling sidecar: {:?} {:?} --models {:?}", sidecar_path, audio_path, model_dir);
+        // Convert language to CLI argument
+        let language_str = match language {
+            TranscriptionLanguage::Auto => "auto",
+            TranscriptionLanguage::French => "french",
+            TranscriptionLanguage::English => "english",
+        };
+
+        debug!(
+            "Calling sidecar: {:?} {:?} --models {:?} --language {} --beam-width {} --temperature {} --blank-penalty {}",
+            sidecar_path, audio_path, model_dir, language_str,
+            config.beam_width, config.temperature, config.blank_penalty
+        );
 
         let output = Command::new(sidecar_path)
             .arg(audio_path)
             .arg("--models")
             .arg(model_dir)
+            .arg("--language")
+            .arg(language_str)
+            .arg("--beam-width")
+            .arg(config.beam_width.to_string())
+            .arg("--temperature")
+            .arg(config.temperature.to_string())
+            .arg("--blank-penalty")
+            .arg(config.blank_penalty.to_string())
             .output()
             .map_err(|e| AppError::Transcription(format!("Failed to run sidecar: {}", e)))?;
 
@@ -185,20 +209,24 @@ impl ASREngine for CoreMLEngine {
     fn run_inference(
         &self,
         samples: &[f32],
-        _language: TranscriptionLanguage,
-        _config: &DecodingConfig,
+        language: TranscriptionLanguage,
+        config: &DecodingConfig,
     ) -> Result<String> {
         info!(
-            "Starting CoreML sidecar inference on {} samples ({:.2}s)",
+            "Starting CoreML sidecar inference on {} samples ({:.2}s), language={:?}, beam_width={}, temp={:.2}, blank_penalty={:.1}",
             samples.len(),
-            samples.len() as f32 / 16000.0
+            samples.len() as f32 / 16000.0,
+            language,
+            config.beam_width,
+            config.temperature,
+            config.blank_penalty
         );
 
         // Write audio to temp file
         let temp_wav = self.write_temp_wav(samples)?;
 
-        // Call sidecar
-        let result = self.call_sidecar(&temp_wav);
+        // Call sidecar with parameters
+        let result = self.call_sidecar(&temp_wav, language, config);
 
         // Clean up temp file
         if let Err(e) = std::fs::remove_file(&temp_wav) {

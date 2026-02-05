@@ -15,3 +15,8 @@ pub fn delete_transcription(id: String) -> Result<()> {
 pub fn update_transcription_text(id: String, edited_text: String) -> Result<()> {
     storage::with_db(|conn| storage::update_transcription_text(conn, &id, &edited_text))
 }
+
+#[tauri::command]
+pub fn delete_all_transcriptions() -> Result<()> {
+    storage::with_db(|conn| storage::delete_all_transcriptions(conn))
+}
