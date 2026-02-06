@@ -14,25 +14,59 @@ use tracing_subscriber::{fmt, prelude::*, EnvFilter};
 
 /// Initialize OpenVINO library path for runtime linking
 fn init_openvino() -> bool {
-    // Check common OpenVINO library paths on macOS
-    let openvino_paths = [
-        "/usr/local/lib",  // Homebrew symlinks
-        "/usr/local/Cellar/openvino/2025.4.1_3/lib",  // Homebrew direct
-        "/opt/intel/openvino/runtime/lib",  // Intel installer
-    ];
+    #[cfg(target_os = "macos")]
+    let (paths, lib_name, ld_var) = (
+        vec![
+            "/usr/local/lib".to_string(),
+            "/usr/local/Cellar/openvino/2025.4.1_3/lib".to_string(),
+            "/opt/intel/openvino/runtime/lib".to_string(),
+        ],
+        "libopenvino_c.dylib",
+        "DYLD_LIBRARY_PATH",
+    );
 
-    for path in openvino_paths {
-        let lib_path = format!("{}/libopenvino_c.dylib", path);
+    #[cfg(target_os = "windows")]
+    let (paths, lib_name, ld_var) = (
+        {
+            let mut p = vec![
+                r"C:\Program Files (x86)\Intel\openvino\runtime\bin\intel64\Release".to_string(),
+                r"C:\Program Files (x86)\Intel\openvino\runtime\bin\intel64\Debug".to_string(),
+                r"C:\Program Files\Intel\openvino\runtime\bin\intel64\Release".to_string(),
+            ];
+            // Also check next to the executable
+            if let Ok(exe) = std::env::current_exe() {
+                if let Some(dir) = exe.parent() {
+                    p.insert(0, dir.to_string_lossy().to_string());
+                }
+            }
+            p
+        },
+        "openvino_c.dll",
+        "PATH",
+    );
+
+    #[cfg(target_os = "linux")]
+    let (paths, lib_name, ld_var) = (
+        vec![
+            "/usr/lib/x86_64-linux-gnu".to_string(),
+            "/usr/local/lib".to_string(),
+            "/opt/intel/openvino/runtime/lib/intel64".to_string(),
+        ],
+        "libopenvino_c.so",
+        "LD_LIBRARY_PATH",
+    );
+
+    for path in &paths {
+        let lib_path = format!("{}/{}", path, lib_name);
         if std::path::Path::new(&lib_path).exists() {
-            // Set multiple environment variables to help library loading
             std::env::set_var("OPENVINO_LIB_PATH", path);
             std::env::set_var("OV_LIB_PATH", path);
             std::env::set_var("INTEL_OPENVINO_DIR", path);
-            // Also set DYLD_LIBRARY_PATH for runtime loading on macOS
-            if let Ok(existing) = std::env::var("DYLD_LIBRARY_PATH") {
-                std::env::set_var("DYLD_LIBRARY_PATH", format!("{}:{}", path, existing));
+            if let Ok(existing) = std::env::var(ld_var) {
+                let sep = if cfg!(windows) { ";" } else { ":" };
+                std::env::set_var(ld_var, format!("{}{}{}", path, sep, existing));
             } else {
-                std::env::set_var("DYLD_LIBRARY_PATH", path);
+                std::env::set_var(ld_var, path);
             }
             info!("Found OpenVINO library at {}", path);
             return true;
@@ -43,9 +77,46 @@ fn init_openvino() -> bool {
     false
 }
 
+/// Cross-platform app data directory
+fn app_data_dir() -> Option<PathBuf> {
+    #[cfg(target_os = "macos")]
+    {
+        std::env::var_os("HOME")
+            .map(PathBuf::from)
+            .map(|p| p.join("Library/Application Support"))
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        std::env::var_os("LOCALAPPDATA").map(PathBuf::from)
+    }
+
+    #[cfg(target_os = "linux")]
+    {
+        std::env::var_os("XDG_DATA_HOME")
+            .map(PathBuf::from)
+            .or_else(|| {
+                std::env::var_os("HOME")
+                    .map(PathBuf::from)
+                    .map(|p| p.join(".local/share"))
+            })
+    }
+}
+
 /// Get the base model directory path
 fn get_model_base_path() -> Option<PathBuf> {
-    // Try relative to executable first (for development)
+    // 1. App data directory (production + test builds)
+    // macOS: ~/Library/Application Support/com.wakascribe.app/models/
+    // Windows: %LOCALAPPDATA%/com.wakascribe.app/models/
+    // Linux: ~/.local/share/com.wakascribe.app/models/
+    if let Some(app_models) = app_data_dir().map(|p| p.join("com.wakascribe.app").join("models")) {
+        if app_models.exists() {
+            info!("Found models in app data directory: {:?}", app_models);
+            return Some(app_models);
+        }
+    }
+
+    // 2. Try relative to executable (for development)
     if let Ok(exe_path) = std::env::current_exe() {
         // In development: src-tauri/target/debug/wakascribe
         // Model is at project_root/model (4 levels up)
@@ -61,7 +132,7 @@ fn get_model_base_path() -> Option<PathBuf> {
             return Some(path);
         }
 
-        // Try from the bundle (macOS .app)
+        // 3. Try from the bundle (macOS .app)
         let mut bundle_path = exe_path;
         bundle_path.pop(); // Remove executable
         bundle_path.pop(); // Remove MacOS
@@ -73,7 +144,7 @@ fn get_model_base_path() -> Option<PathBuf> {
         }
     }
 
-    // Try current directory
+    // 4. Try current directory
     let current = PathBuf::from("model");
     if current.exists() {
         return Some(current);
