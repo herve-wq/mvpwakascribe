@@ -16,6 +16,7 @@
 3. Les DLLs nécessaires :
    - `openvino_c.dll`
    - `openvino.dll`
+   - `openvino_ir_frontend.dll` (lecture des modèles .xml/.bin)
    - `openvino_intel_cpu_plugin.dll`
    - `tbb12.dll` (dépendance Intel TBB)
 
@@ -67,6 +68,7 @@ Deux options :
 ```powershell
 copy "C:\Program Files (x86)\Intel\openvino\runtime\bin\intel64\Release\openvino_c.dll" "C:\Program Files\WakaScribe\"
 copy "C:\Program Files (x86)\Intel\openvino\runtime\bin\intel64\Release\openvino.dll" "C:\Program Files\WakaScribe\"
+copy "C:\Program Files (x86)\Intel\openvino\runtime\bin\intel64\Release\openvino_ir_frontend.dll" "C:\Program Files\WakaScribe\"
 copy "C:\Program Files (x86)\Intel\openvino\runtime\bin\intel64\Release\openvino_intel_cpu_plugin.dll" "C:\Program Files\WakaScribe\"
 copy "C:\Program Files (x86)\Intel\openvino\runtime\bin\intel64\Release\tbb12.dll" "C:\Program Files\WakaScribe\"
 ```

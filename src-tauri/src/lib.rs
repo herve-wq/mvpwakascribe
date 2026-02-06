@@ -167,7 +167,8 @@ fn get_model_path(backend: engine::EngineBackend) -> Option<PathBuf> {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     // Initialize logging to both console and file
-    let log_file = File::create("/tmp/wakascribe.log").expect("Failed to create log file");
+    let log_path = std::env::temp_dir().join("wakascribe.log");
+    let log_file = File::create(&log_path).expect("Failed to create log file");
 
     tracing_subscriber::registry()
         .with(fmt::layer()) // Console output

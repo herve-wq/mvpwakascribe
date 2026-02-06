@@ -7,9 +7,9 @@
     "dev": "vite",
     "build": "tsc && vite build",
     "preview": "vite preview",
-    "tauri": "OPENVINO_LIB_PATH=/usr/local/lib tauri",
-    "tauri:dev": "OPENVINO_LIB_PATH=/usr/local/lib tauri dev",
-    "tauri:build": "OPENVINO_LIB_PATH=/usr/local/lib tauri build"
+    "tauri": "tauri",
+    "tauri:dev": "tauri dev",
+    "tauri:build": "tauri build"
   },
   "dependencies": {
     "@tanstack/react-query": "^5.90.20",
