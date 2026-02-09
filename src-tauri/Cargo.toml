@@ -44,12 +44,6 @@ docx-rs = "0.4"
 # OpenVINO for ONNX model inference (runtime-linking for homebrew install)
 openvino = { version = "0.9.1", features = ["runtime-linking"] }
 
-# ONNX Runtime for alternative backend
-ort = { version = "2.0.0-rc.11", features = ["load-dynamic"] }
-
-# Mel spectrogram
-rustfft = "6"
-ndarray = "0.16"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 cocoa = "0.26"
@@ -64,10 +58,6 @@ path = "src/bin/test_openvino_state.rs"
 [[bin]]
 name = "test_full_pipeline"
 path = "src/bin/test_full_pipeline.rs"
-
-[[bin]]
-name = "test_onnxruntime"
-path = "src/bin/test_onnxruntime.rs"
 
 [[bin]]
 name = "test_coreml"

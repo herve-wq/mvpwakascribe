@@ -1,58 +1,12 @@
 use crate::audio::{split_audio_smart, SmartChunkConfig};
 use crate::engine::config::DecodingConfig;
 use crate::engine::decoder::{TDTDecoder, Vocabulary};
-use crate::engine::{filter_chunk_hallucinations, ASREngine, MAX_AUDIO_SAMPLES};
+use crate::engine::{filter_chunk_hallucinations, ASREngine, TranscriptionLanguage, MAX_AUDIO_SAMPLES};
 use crate::error::{AppError, Result};
-use crate::storage::{Segment, Transcription};
 use openvino::{CompiledModel, Core, DeviceType, InferRequest};
-use serde::{Deserialize, Serialize};
 use std::path::Path;
 use std::sync::Mutex;
 use tracing::{debug, info, warn};
-use uuid::Uuid;
-
-/// Language selection for transcription
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum TranscriptionLanguage {
-    /// Auto-detect language (default)
-    #[default]
-    Auto,
-    /// Force French
-    French,
-    /// Force English
-    English,
-}
-
-impl TranscriptionLanguage {
-    /// Get the token ID to inject for this language
-    /// Returns None for Auto (let the model decide)
-    pub fn token_id(&self) -> Option<i64> {
-        match self {
-            TranscriptionLanguage::Auto => None,
-            TranscriptionLanguage::French => Some(71),  // <|fr|>
-            TranscriptionLanguage::English => Some(64), // <|en|>
-        }
-    }
-
-    /// Get display name
-    pub fn display_name(&self) -> &'static str {
-        match self {
-            TranscriptionLanguage::Auto => "Auto",
-            TranscriptionLanguage::French => "Français",
-            TranscriptionLanguage::English => "English",
-        }
-    }
-
-    /// Get ISO language code for storage
-    pub fn code(&self) -> &'static str {
-        match self {
-            TranscriptionLanguage::Auto => "auto",
-            TranscriptionLanguage::French => "fr",
-            TranscriptionLanguage::English => "en",
-        }
-    }
-}
 
 /// Token spécial pour le blank (pas de sortie)
 const BLANK_TOKEN: u32 = 8192;
@@ -295,64 +249,6 @@ impl ParakeetEngine {
             && self.decoder_request.is_some()
             && self.joint_request.is_some()
             && self.tdt_decoder.is_some()
-    }
-
-    /// Transcribe audio samples (16kHz mono f32)
-    pub fn transcribe(
-        &self,
-        samples: &[f32],
-        source_type: &str,
-        source_name: Option<String>,
-        language: TranscriptionLanguage,
-        decoding_config: Option<DecodingConfig>,
-    ) -> Result<Transcription> {
-        let duration_ms = (samples.len() as f64 / 16000.0 * 1000.0) as i64;
-        let config = decoding_config.unwrap_or_default();
-
-        if !self.is_loaded() {
-            info!("Model not loaded, returning mock transcription");
-            return self.mock_transcribe(samples, source_type, source_name);
-        }
-
-        info!(
-            "Transcribing {} samples ({} ms) with language: {:?}, beam_width: {}, temperature: {:.2}",
-            samples.len(),
-            duration_ms,
-            language,
-            config.beam_width,
-            config.temperature
-        );
-
-        match self.run_inference(samples, language, &config) {
-            Ok(text) => {
-                let now = chrono::Utc::now().to_rfc3339();
-                let segments = vec![Segment {
-                    id: Uuid::new_v4().to_string(),
-                    start_ms: 0,
-                    end_ms: duration_ms,
-                    text: text.clone(),
-                    confidence: 0.95,
-                }];
-
-                Ok(Transcription {
-                    id: Uuid::new_v4().to_string(),
-                    created_at: now.clone(),
-                    updated_at: now,
-                    source_type: source_type.to_string(),
-                    source_name,
-                    duration_ms,
-                    language: language.code().to_string(),
-                    segments,
-                    raw_text: text,
-                    edited_text: None,
-                    is_edited: false,
-                })
-            }
-            Err(e) => {
-                warn!("Inference failed: {}. Falling back to mock transcription.", e);
-                self.mock_transcribe(samples, source_type, source_name)
-            }
-        }
     }
 
     /// Pipeline complet de transcription TDT avec support chunking
@@ -1260,41 +1156,6 @@ impl ParakeetEngine {
         Ok(best_tokens)
     }
 
-    /// Mock transcription for development without the model
-    fn mock_transcribe(
-        &self,
-        samples: &[f32],
-        source_type: &str,
-        source_name: Option<String>,
-    ) -> Result<Transcription> {
-        let now = chrono::Utc::now().to_rfc3339();
-        let duration_ms = (samples.len() as f64 / 16000.0 * 1000.0) as i64;
-
-        let mock_text = "Ceci est une transcription de demonstration. \
-            Le modele Parakeet n'est pas encore charge.";
-
-        let segments = vec![Segment {
-            id: Uuid::new_v4().to_string(),
-            start_ms: 0,
-            end_ms: duration_ms,
-            text: mock_text.to_string(),
-            confidence: 0.85,
-        }];
-
-        Ok(Transcription {
-            id: Uuid::new_v4().to_string(),
-            created_at: now.clone(),
-            updated_at: now,
-            source_type: source_type.to_string(),
-            source_name,
-            duration_ms,
-            language: "fr".to_string(),
-            segments,
-            raw_text: mock_text.to_string(),
-            edited_text: None,
-            is_edited: false,
-        })
-    }
 }
 
 impl Default for ParakeetEngine {

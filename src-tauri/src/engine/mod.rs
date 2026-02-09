@@ -2,9 +2,6 @@ pub mod config;
 #[cfg(target_os = "macos")]
 pub mod coreml;
 pub mod decoder;
-pub mod mel;
-pub mod merger; // Kept for potential future use (LCS-based merge)
-pub mod onnxruntime;
 pub mod parakeet;
 
 use crate::error::Result;
@@ -69,10 +66,50 @@ pub const MAX_AUDIO_SAMPLES: usize = 240000;
 pub use config::DecodingConfig;
 #[cfg(target_os = "macos")]
 pub use coreml::CoreMLEngine;
-pub use onnxruntime::OnnxRuntimeEngine;
-pub use parakeet::{ParakeetEngine, TranscriptionLanguage};
+pub use parakeet::ParakeetEngine;
 
-// Re-export for use in commands
+/// Language selection for transcription
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum TranscriptionLanguage {
+    /// Auto-detect language (default)
+    #[default]
+    Auto,
+    /// Force French
+    French,
+    /// Force English
+    English,
+}
+
+impl TranscriptionLanguage {
+    /// Get the token ID to inject for this language
+    /// Returns None for Auto (let the model decide)
+    pub fn token_id(&self) -> Option<i64> {
+        match self {
+            TranscriptionLanguage::Auto => None,
+            TranscriptionLanguage::French => Some(71),  // <|fr|>
+            TranscriptionLanguage::English => Some(64), // <|en|>
+        }
+    }
+
+    /// Get display name
+    pub fn display_name(&self) -> &'static str {
+        match self {
+            TranscriptionLanguage::Auto => "Auto",
+            TranscriptionLanguage::French => "Français",
+            TranscriptionLanguage::English => "English",
+        }
+    }
+
+    /// Get ISO language code for storage
+    pub fn code(&self) -> &'static str {
+        match self {
+            TranscriptionLanguage::Auto => "auto",
+            TranscriptionLanguage::French => "fr",
+            TranscriptionLanguage::English => "en",
+        }
+    }
+}
 
 /// Available inference backends
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
@@ -81,8 +118,6 @@ pub enum EngineBackend {
     /// OpenVINO backend (FluidInference model)
     #[default]
     OpenVINO,
-    /// ONNX Runtime backend (istupakov model)
-    OnnxRuntime,
     /// CoreML backend (Apple platforms only)
     #[cfg(target_os = "macos")]
     CoreML,
@@ -93,7 +128,6 @@ impl EngineBackend {
     pub fn model_subdir(&self) -> &'static str {
         match self {
             EngineBackend::OpenVINO => "openvino",
-            EngineBackend::OnnxRuntime => "onnxruntime",
             #[cfg(target_os = "macos")]
             EngineBackend::CoreML => "coreml",
         }
@@ -103,7 +137,6 @@ impl EngineBackend {
     pub fn display_name(&self) -> &'static str {
         match self {
             EngineBackend::OpenVINO => "OpenVINO",
-            EngineBackend::OnnxRuntime => "ONNX Runtime",
             #[cfg(target_os = "macos")]
             EngineBackend::CoreML => "CoreML",
         }
@@ -112,7 +145,7 @@ impl EngineBackend {
 
 /// Trait for ASR inference engines
 ///
-/// This allows swapping between different backends (OpenVINO, ONNX Runtime)
+/// This allows swapping between different backends (OpenVINO, CoreML)
 /// while keeping a consistent interface.
 pub trait ASREngine: Send + Sync {
     /// Get the engine name for logging
@@ -152,7 +185,6 @@ impl DynamicEngine {
     pub fn new(backend: EngineBackend) -> Self {
         let engine: Box<dyn ASREngine> = match backend {
             EngineBackend::OpenVINO => Box::new(ParakeetEngine::new()),
-            EngineBackend::OnnxRuntime => Box::new(OnnxRuntimeEngine::new()),
             #[cfg(target_os = "macos")]
             EngineBackend::CoreML => Box::new(CoreMLEngine::new()),
         };
@@ -189,7 +221,6 @@ impl DynamicEngine {
 
         let mut new_engine: Box<dyn ASREngine> = match backend {
             EngineBackend::OpenVINO => Box::new(ParakeetEngine::new()),
-            EngineBackend::OnnxRuntime => Box::new(OnnxRuntimeEngine::new()),
             #[cfg(target_os = "macos")]
             EngineBackend::CoreML => Box::new(CoreMLEngine::new()),
         };

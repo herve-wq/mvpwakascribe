@@ -33,7 +33,7 @@ pub struct Settings {
     pub language: String,
     pub input_device_id: Option<String>,
     pub shortcuts: ShortcutSettings,
-    /// Inference engine backend: "openvino", "onnxruntime", or "coreml" (macOS only)
+    /// Inference engine backend: "openvino" or "coreml" (macOS only)
     pub engine_backend: String,
 }
 

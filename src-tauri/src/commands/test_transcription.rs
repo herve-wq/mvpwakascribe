@@ -56,8 +56,6 @@ fn find_test_audio() -> Result<PathBuf> {
         "../../model/test_audio.wav",
         "../../../model/test_audio.wav",
         "../../../../model/test_audio.wav",
-        // Absolu pour développement
-        "/Users/herve/dev/mvpparakeet/wakascribe/model/test_audio.wav",
         // Bundle macOS
         "../Resources/model/test_audio.wav",
     ];

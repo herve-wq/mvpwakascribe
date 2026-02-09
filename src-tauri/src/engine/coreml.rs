@@ -54,8 +54,6 @@ impl CoreMLEngine {
             // Development location (relative to src-tauri)
             PathBuf::from("binaries/parakeet-coreml-x86_64-apple-darwin"),
             PathBuf::from("../src-tauri/binaries/parakeet-coreml-x86_64-apple-darwin"),
-            // Absolute development path
-            PathBuf::from("/Users/herve/dev/mvpparakeet/wakascribe/src-tauri/binaries/parakeet-coreml-x86_64-apple-darwin"),
         ];
 
         for path in &candidates {
