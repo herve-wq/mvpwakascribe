@@ -44,29 +44,20 @@ impl CoreMLEngine {
 
     /// Find the sidecar binary
     fn find_sidecar() -> Option<PathBuf> {
-        // In development: next to the executable or in src-tauri/binaries
         let exe_dir = std::env::current_exe().ok()?.parent()?.to_path_buf();
 
-        // Check various locations
-        let candidates = [
-            // Tauri bundle location
-            exe_dir.join("parakeet-coreml"),
-            // Development location (relative to src-tauri)
-            PathBuf::from("binaries/parakeet-coreml-x86_64-apple-darwin"),
-            PathBuf::from("../src-tauri/binaries/parakeet-coreml-x86_64-apple-darwin"),
-        ];
-
-        for path in &candidates {
-            if path.exists() {
-                info!("Found sidecar at: {:?}", path);
-                return Some(path.clone());
-            }
+        // Bundled by Tauri via externalBin (production + dev)
+        let bundled = exe_dir.join("parakeet-coreml");
+        if bundled.exists() {
+            info!("Found sidecar at: {:?}", bundled);
+            return Some(bundled);
         }
 
-        // Try using tauri's sidecar resolution
-        #[cfg(feature = "tauri")]
-        if let Ok(sidecar) = tauri::api::process::Command::new_sidecar("parakeet-coreml") {
-            // This would work in a Tauri context
+        // Fallback: src-tauri/binaries/ for manual testing
+        let dev_path = PathBuf::from("binaries/parakeet-coreml");
+        if dev_path.exists() {
+            info!("Found sidecar at: {:?}", dev_path);
+            return Some(dev_path);
         }
 
         None
