@@ -60,11 +60,10 @@ export interface AudioDevice {
 }
 
 // Available inference engine backends
-export type EngineBackend = "openvino" | "onnxruntime" | "coreml";
+export type EngineBackend = "openvino" | "coreml";
 
 export const ENGINE_BACKENDS: { value: EngineBackend; label: string; description: string }[] = [
   { value: "openvino", label: "OpenVINO", description: "Intel OpenVINO (default, optimized for Intel CPUs)" },
-  { value: "onnxruntime", label: "ONNX Runtime", description: "Microsoft ONNX Runtime (cross-platform)" },
   { value: "coreml", label: "CoreML", description: "Apple CoreML (optimized for Apple Silicon, Neural Engine)" },
 ];
 
@@ -89,6 +88,13 @@ export interface TranscriptionProgress {
   currentMs: number;
   totalMs: number;
   speedFactor: number;
+}
+
+// Engine status from backend
+export interface EngineStatus {
+  backend: string;
+  isLoaded: boolean;
+  error: string | null;
 }
 
 // Tauri command return types

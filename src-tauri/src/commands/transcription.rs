@@ -6,6 +6,7 @@ use crate::storage::{
     self, insert_transcription, Transcription, TranscriptionProgress,
 };
 use parking_lot::Mutex;
+use serde::Serialize;
 use std::path::PathBuf;
 use tauri::{Emitter, State, Window};
 use tracing::info;
@@ -16,6 +17,33 @@ pub struct EngineState(pub Mutex<DynamicEngine>);
 /// State for the model base path (needed for backend switching)
 pub struct ModelPathState(pub PathBuf);
 
+/// Shared state for engine loading error messages
+pub struct EngineErrorState(pub Mutex<Option<String>>);
+
+/// Engine status returned to the frontend
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EngineStatus {
+    backend: String,
+    is_loaded: bool,
+    error: Option<String>,
+}
+
+/// Get the current engine status (backend, loaded, error)
+#[tauri::command]
+pub fn get_engine_status(
+    engine_state: State<'_, EngineState>,
+    error_state: State<'_, EngineErrorState>,
+) -> EngineStatus {
+    let engine = engine_state.0.lock();
+    let error = error_state.0.lock();
+    EngineStatus {
+        backend: engine.backend().display_name().to_string(),
+        is_loaded: engine.is_loaded(),
+        error: error.clone(),
+    }
+}
+
 #[tauri::command]
 pub fn stop_recording(
     audio_state: State<'_, AudioState>,
@@ -23,6 +51,14 @@ pub fn stop_recording(
     language: Option<TranscriptionLanguage>,
     decoding_config: Option<DecodingConfig>,
 ) -> Result<Transcription> {
+    // Guard: engine must be loaded
+    {
+        let engine = engine_state.0.lock();
+        if !engine.is_loaded() {
+            return Err(AppError::InvalidState("Moteur non charge".into()));
+        }
+    }
+
     let samples = audio_state.0.stop()?;
     let sample_rate = audio_state.0.sample_rate();
 
@@ -53,6 +89,14 @@ pub async fn transcribe_file(
     language: Option<TranscriptionLanguage>,
     decoding_config: Option<DecodingConfig>,
 ) -> Result<Transcription> {
+    // Guard: engine must be loaded
+    {
+        let engine = engine_state.0.lock();
+        if !engine.is_loaded() {
+            return Err(AppError::InvalidState("Moteur non charge".into()));
+        }
+    }
+
     let path = PathBuf::from(&file_path);
 
     if !path.exists() {
@@ -125,11 +169,11 @@ pub fn get_transcription(id: String) -> Result<Transcription> {
 pub fn switch_engine_backend(
     engine_state: State<'_, EngineState>,
     model_path_state: State<'_, ModelPathState>,
+    error_state: State<'_, EngineErrorState>,
     backend: String,
 ) -> Result<String> {
     let backend = match backend.as_str() {
         "openvino" => EngineBackend::OpenVINO,
-        "onnxruntime" => EngineBackend::OnnxRuntime,
         #[cfg(target_os = "macos")]
         "coreml" => EngineBackend::CoreML,
         _ => return Err(AppError::InvalidInput(format!("Unknown backend: {}", backend))),
@@ -137,18 +181,28 @@ pub fn switch_engine_backend(
 
     let model_dir = model_path_state.0.join(backend.model_subdir());
     if !model_dir.exists() {
-        return Err(AppError::NotFound(format!(
+        let err_msg = format!(
             "Model directory not found for {}: {:?}",
             backend.display_name(),
             model_dir
-        )));
+        );
+        *error_state.0.lock() = Some(err_msg.clone());
+        return Err(AppError::NotFound(err_msg));
     }
 
     let mut engine = engine_state.0.lock();
-    engine.switch_backend(backend, &model_dir)?;
-
-    info!("Switched to {} backend", backend.display_name());
-    Ok(backend.display_name().to_string())
+    match engine.switch_backend(backend, &model_dir) {
+        Ok(_) => {
+            *error_state.0.lock() = None;
+            info!("Switched to {} backend", backend.display_name());
+            Ok(backend.display_name().to_string())
+        }
+        Err(e) => {
+            let err_msg = format!("Failed to load {}: {}", backend.display_name(), e);
+            *error_state.0.lock() = Some(err_msg);
+            Err(e)
+        }
+    }
 }
 
 /// Get the current engine backend name

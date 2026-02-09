@@ -5,7 +5,7 @@ mod error;
 mod export;
 mod storage;
 
-use commands::{AudioState, EngineState, ModelPathState};
+use commands::{AudioState, EngineErrorState, EngineState, ModelPathState};
 use parking_lot::Mutex;
 use std::path::PathBuf;
 use std::fs::File;
@@ -187,13 +187,6 @@ pub fn run() {
         eprintln!("Failed to initialize database: {}", e);
     }
 
-    // Read saved engine backend preference from database
-    let saved_backend = storage::with_db(|conn| storage::get_settings(conn))
-        .ok()
-        .map(|s| s.engine_backend)
-        .unwrap_or_else(|| "openvino".to_string());
-    info!("Saved engine backend preference: {}", saved_backend);
-
     // Initialize OpenVINO library path (needed if we want to use OpenVINO)
     let openvino_ok = init_openvino();
 
@@ -201,25 +194,64 @@ pub fn run() {
     let model_base_path = get_model_base_path().unwrap_or_else(|| PathBuf::from("model"));
     info!("Model base path: {:?}", model_base_path);
 
-    // Determine which backend to use based on saved preference
-    let (backend, engine_loaded) = match saved_backend.as_str() {
-        "onnxruntime" => {
-            info!("Loading saved preference: ONNX Runtime");
-            try_load_backend(engine::EngineBackend::OnnxRuntime, openvino_ok)
+    // Determine which backend to use: saved preference or auto-detect on first launch
+    let has_saved_backend = storage::with_db(|conn| storage::has_setting(conn, "engine_backend"))
+        .unwrap_or(false);
+
+    let selected_backend_str = if has_saved_backend {
+        let saved = storage::with_db(|conn| storage::get_settings(conn))
+            .ok()
+            .map(|s| s.engine_backend)
+            .unwrap_or_else(|| "openvino".to_string());
+        info!("Using saved engine backend preference: {}", saved);
+        saved
+    } else {
+        let detected = detect_best_backend(openvino_ok);
+        info!("First launch: auto-detected best backend: {}", detected);
+        // Save the detected preference to DB
+        if let Err(e) = storage::with_db(|conn| {
+            conn.execute(
+                "INSERT OR REPLACE INTO settings (key, value) VALUES ('engine_backend', ?1)",
+                [&detected],
+            ).map_err(crate::error::AppError::from)
+        }) {
+            warn!("Failed to save detected backend preference: {}", e);
         }
+        detected
+    };
+
+    let (backend, engine_loaded, load_error) = match selected_backend_str.as_str() {
         #[cfg(target_os = "macos")]
         "coreml" => {
-            info!("Loading saved preference: CoreML");
+            info!("Loading: CoreML");
             try_load_backend(engine::EngineBackend::CoreML, openvino_ok)
         }
         _ => {
-            // Default to OpenVINO
-            info!("Loading saved preference: OpenVINO");
+            info!("Loading: OpenVINO");
             try_load_backend(engine::EngineBackend::OpenVINO, openvino_ok)
         }
     };
 
-    fn try_load_backend(preferred: engine::EngineBackend, openvino_ok: bool) -> (engine::DynamicEngine, bool) {
+    /// Detect the best backend for the current platform
+    fn detect_best_backend(openvino_ok: bool) -> String {
+        #[cfg(target_os = "macos")]
+        {
+            // On macOS, prefer CoreML if models are available
+            if get_model_path(engine::EngineBackend::CoreML).is_some() {
+                return "coreml".to_string();
+            }
+        }
+        // Default to OpenVINO on all platforms
+        if openvino_ok && get_model_path(engine::EngineBackend::OpenVINO).is_some() {
+            return "openvino".to_string();
+        }
+        "openvino".to_string()
+    }
+
+    fn try_load_backend(
+        preferred: engine::EngineBackend,
+        openvino_ok: bool,
+    ) -> (engine::DynamicEngine, bool, Option<String>) {
         // Try preferred backend first
         if let Some(model_path) = get_model_path(preferred) {
             // For OpenVINO, check if library is available
@@ -231,7 +263,7 @@ pub fn run() {
                 match engine.load_model(&model_path) {
                     Ok(_) => {
                         info!("{} engine loaded successfully", preferred.display_name());
-                        return (engine, true);
+                        return (engine, true, None);
                     }
                     Err(e) => {
                         warn!("Failed to load {} model: {}", preferred.display_name(), e);
@@ -244,7 +276,6 @@ pub fn run() {
 
         // Fallback: try other backends
         let fallbacks = [
-            engine::EngineBackend::OnnxRuntime,
             engine::EngineBackend::OpenVINO,
         ];
 
@@ -261,7 +292,7 @@ pub fn run() {
                 match engine.load_model(&model_path) {
                     Ok(_) => {
                         info!("{} engine loaded successfully (fallback)", fallback.display_name());
-                        return (engine, true);
+                        return (engine, true, None);
                     }
                     Err(e) => {
                         warn!("Failed to load {} model: {}", fallback.display_name(), e);
@@ -271,13 +302,27 @@ pub fn run() {
         }
 
         // Nothing worked
-        (engine::DynamicEngine::new(engine::EngineBackend::OpenVINO), false)
+        let err = "Aucun moteur n'a pu etre charge. Verifiez que les modeles sont installes.".to_string();
+        (engine::DynamicEngine::new(engine::EngineBackend::OpenVINO), false, Some(err))
     }
 
     if !engine_loaded {
-        warn!("No model loaded. Using mock transcription.");
+        warn!("No model loaded: {:?}", load_error);
     } else {
         info!("Using {} backend", backend.name());
+        // Sync DB with the actually loaded backend (may differ from preference after fallback)
+        let actual_backend = backend.backend().model_subdir().to_string();
+        if actual_backend != selected_backend_str {
+            info!("Backend fallback occurred: requested '{}', loaded '{}'", selected_backend_str, actual_backend);
+            if let Err(e) = storage::with_db(|conn| {
+                conn.execute(
+                    "INSERT OR REPLACE INTO settings (key, value) VALUES ('engine_backend', ?1)",
+                    [&actual_backend],
+                ).map_err(crate::error::AppError::from)
+            }) {
+                warn!("Failed to save actual backend to DB: {}", e);
+            }
+        }
     }
 
     tauri::Builder::default()
@@ -289,6 +334,7 @@ pub fn run() {
         .manage(AudioState(audio::AudioCapture::new()))
         .manage(EngineState(Mutex::new(backend)))
         .manage(ModelPathState(model_base_path))
+        .manage(EngineErrorState(Mutex::new(load_error)))
         .invoke_handler(tauri::generate_handler![
             // Audio commands
             commands::list_audio_devices,
@@ -304,6 +350,7 @@ pub fn run() {
             // Engine commands
             commands::switch_engine_backend,
             commands::get_engine_backend,
+            commands::get_engine_status,
             // History commands
             commands::list_transcriptions,
             commands::delete_transcription,

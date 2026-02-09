@@ -1,4 +1,5 @@
 import { useRecording } from "../../hooks/useRecording";
+import { useAppStore } from "../../stores/appStore";
 
 function formatTime(ms: number): string {
   const totalSeconds = Math.floor(ms / 1000);
@@ -10,11 +11,13 @@ function formatTime(ms: number): string {
 export function RecordingControls() {
   const { recordingState, elapsedMs, toggleRecording, togglePause } =
     useRecording();
+  const engineStatus = useAppStore((s) => s.engineStatus);
 
   const isRecording = recordingState === "recording";
   const isPaused = recordingState === "paused";
   const isProcessing = recordingState === "processing";
   const isActive = isRecording || isPaused;
+  const engineNotReady = !engineStatus.isLoaded;
 
   return (
     <div className="flex items-center justify-center gap-4">
@@ -37,10 +40,11 @@ export function RecordingControls() {
       {/* Main record/stop button */}
       <button
         onClick={toggleRecording}
-        disabled={isProcessing}
+        disabled={isProcessing || engineNotReady}
+        title={engineNotReady ? "Moteur non charge" : undefined}
         className={`w-16 h-16 rounded-full flex items-center justify-center transition-all ${
-          isProcessing
-            ? "bg-gray-400 cursor-not-allowed"
+          isProcessing || engineNotReady
+            ? "bg-gray-400 cursor-not-allowed opacity-50"
             : isActive
               ? "bg-red-500 hover:bg-red-600"
               : "bg-[var(--color-accent)] hover:bg-[var(--color-accent-hover)]"

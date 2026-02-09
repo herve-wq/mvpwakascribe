@@ -6,6 +6,7 @@ import type {
   Segment,
   Settings,
   AudioDevice,
+  EngineStatus,
 } from "../lib/types";
 import { DEFAULT_TRANSCRIPTION_SETTINGS } from "../lib/types";
 
@@ -30,6 +31,9 @@ interface AppState {
   // History
   transcriptions: Transcription[];
 
+  // Engine
+  engineStatus: EngineStatus;
+
   // UI
   showSettings: boolean;
   showHistory: boolean;
@@ -47,6 +51,7 @@ interface AppState {
   setSettings: (settings: Partial<Settings>) => void;
   setTranscriptions: (transcriptions: Transcription[]) => void;
   addTranscription: (transcription: Transcription) => void;
+  setEngineStatus: (status: EngineStatus) => void;
   toggleSettings: () => void;
   toggleHistory: () => void;
 }
@@ -75,6 +80,7 @@ export const useAppStore = create<AppState>((set) => ({
   audioLevel: 0,
   settings: defaultSettings,
   transcriptions: [],
+  engineStatus: { backend: "", isLoaded: false, error: null },
   showSettings: false,
   showHistory: false,
 
@@ -114,6 +120,7 @@ export const useAppStore = create<AppState>((set) => ({
       currentSegments: transcription.segments || [],
     })),
 
+  setEngineStatus: (engineStatus) => set({ engineStatus }),
   toggleSettings: () => set((state) => ({ showSettings: !state.showSettings })),
   toggleHistory: () => set((state) => ({ showHistory: !state.showHistory })),
 }));

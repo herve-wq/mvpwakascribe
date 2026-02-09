@@ -6,6 +6,7 @@ import type {
   TranscriptionProgress,
   TranscriptionLanguage,
   DecodingConfig,
+  EngineStatus,
 } from "./types";
 
 // Audio commands
@@ -91,6 +92,10 @@ export async function switchEngineBackend(backend: string): Promise<string> {
 
 export async function getEngineBackend(): Promise<string> {
   return invoke("get_engine_backend");
+}
+
+export async function getEngineStatus(): Promise<EngineStatus> {
+  return invoke("get_engine_status");
 }
 
 // Export commands

@@ -13,7 +13,8 @@ export function FileTranscribe() {
   const [progress, setProgress] = useState<TranscriptionProgress | null>(null);
   const [result, setResult] = useState<Transcription | null>(null);
   const { transcribeFile, copyText, transcriptionSettings } = useTranscription();
-  const { toggleSettings } = useAppStore();
+  const { toggleSettings, engineStatus } = useAppStore();
+  const engineNotReady = !engineStatus.isLoaded;
 
   // Recording state for test audio
   const [isRecording, setIsRecording] = useState(false);
@@ -152,18 +153,24 @@ export function FileTranscribe() {
       {/* Drop zone or progress */}
       {!isProcessing && !result ? (
         <div className="space-y-4">
-          <DropZone onFileSelect={handleFileSelect} />
+          {engineNotReady ? (
+            <div className="flex-1 flex items-center justify-center p-12 rounded-lg border-2 border-dashed border-red-500/30 bg-red-500/5">
+              <p className="text-sm text-red-500">Moteur non charge. Verifiez les parametres du moteur.</p>
+            </div>
+          ) : (
+            <DropZone onFileSelect={handleFileSelect} />
+          )}
 
           {/* Bouton enregistrement test */}
           <button
             onClick={handleToggleRecording}
-            disabled={isProcessing}
+            disabled={isProcessing || engineNotReady}
             className={`w-full px-4 py-3 rounded-lg border-2 border-dashed transition-all flex items-center justify-center gap-3
               ${isRecording
                 ? "border-red-500 bg-red-500/10 hover:bg-red-500/20"
                 : "border-green-500/50 bg-green-500/5 hover:bg-green-500/10 hover:border-green-500"
               }
-              ${isProcessing ? "opacity-50 cursor-not-allowed" : ""}
+              ${isProcessing || engineNotReady ? "opacity-50 cursor-not-allowed" : ""}
             `}
           >
             {isRecording ? (
@@ -200,11 +207,11 @@ export function FileTranscribe() {
           {testFilePath && (
             <button
               onClick={handleTestFile}
-              disabled={isRecording}
+              disabled={isRecording || engineNotReady}
               className={`w-full px-4 py-3 rounded-lg border-2 border-dashed border-blue-500/50
                          bg-blue-500/5 hover:bg-blue-500/10 hover:border-blue-500
                          transition-all flex items-center justify-center gap-3
-                         ${isRecording ? "opacity-50 cursor-not-allowed" : ""}`}
+                         ${isRecording || engineNotReady ? "opacity-50 cursor-not-allowed" : ""}`}
             >
               <svg
                 className="w-5 h-5 text-blue-500"

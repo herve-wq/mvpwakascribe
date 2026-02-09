@@ -158,6 +158,16 @@ pub fn delete_all_transcriptions(conn: &Connection) -> Result<()> {
 
 // Settings queries
 
+/// Check if a setting key exists in the database
+pub fn has_setting(conn: &Connection, key: &str) -> Result<bool> {
+    let count: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM settings WHERE key = ?1",
+        [key],
+        |row| row.get(0),
+    )?;
+    Ok(count > 0)
+}
+
 pub fn get_settings(conn: &Connection) -> Result<Settings> {
     let mut stmt = conn.prepare("SELECT key, value FROM settings")?;
     let rows = stmt.query_map([], |row| {

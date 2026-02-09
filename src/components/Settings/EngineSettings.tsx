@@ -1,12 +1,21 @@
 import { useState } from "react";
 import { useAppStore } from "../../stores/appStore";
 import { ENGINE_BACKENDS, EngineBackend } from "../../lib/types";
-import { updateSettings as saveSettings, switchEngineBackend } from "../../lib/tauri";
+import { updateSettings as saveSettings, switchEngineBackend, getEngineStatus } from "../../lib/tauri";
 
 export function EngineSettings() {
-  const { settings, setSettings } = useAppStore();
+  const { settings, setSettings, engineStatus, setEngineStatus } = useAppStore();
   const [switching, setSwitching] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  const refreshEngineStatus = async () => {
+    try {
+      const status = await getEngineStatus();
+      setEngineStatus(status);
+    } catch (e) {
+      console.error("Failed to refresh engine status:", e);
+    }
+  };
 
   const handleBackendChange = async (backend: EngineBackend) => {
     if (backend === settings.engineBackend) return;
@@ -27,10 +36,15 @@ export function EngineSettings() {
       console.error("Failed to switch backend:", e);
     } finally {
       setSwitching(false);
+      await refreshEngineStatus();
     }
   };
 
-  const currentBackend = ENGINE_BACKENDS.find(b => b.value === settings.engineBackend) || ENGINE_BACKENDS[0];
+  // Source of truth: engineStatus.backend from DynamicEngine, fallback to settings
+  const activeBackendValue = engineStatus.backend
+    ? ENGINE_BACKENDS.find(b => b.label === engineStatus.backend)?.value
+    : undefined;
+  const currentBackend = ENGINE_BACKENDS.find(b => b.value === (activeBackendValue || settings.engineBackend)) || ENGINE_BACKENDS[0];
 
   return (
     <div className="space-y-4">
@@ -123,13 +137,23 @@ export function EngineSettings() {
               <span className="w-2 h-2 bg-yellow-500 rounded-full animate-pulse" />
               Chargement...
             </span>
-          ) : (
+          ) : engineStatus.isLoaded ? (
             <span className="text-green-500 flex items-center gap-1">
               <span className="w-2 h-2 bg-green-500 rounded-full" />
               Charge
             </span>
+          ) : (
+            <span className="text-red-500 flex items-center gap-1">
+              <span className="w-2 h-2 bg-red-500 rounded-full" />
+              Erreur
+            </span>
           )}
         </div>
+        {!switching && !engineStatus.isLoaded && engineStatus.error && (
+          <div className="text-xs text-red-500 mt-1">
+            {engineStatus.error}
+          </div>
+        )}
       </div>
 
       {/* Note */}
