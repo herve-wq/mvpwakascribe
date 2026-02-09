@@ -247,7 +247,7 @@ impl DynamicEngine {
                     source_type: source_type.to_string(),
                     source_name,
                     duration_ms,
-                    language: "fr".to_string(),
+                    language: language.code().to_string(),
                     segments,
                     raw_text: text,
                     edited_text: None,

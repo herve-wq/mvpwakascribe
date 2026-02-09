@@ -43,6 +43,15 @@ impl TranscriptionLanguage {
             TranscriptionLanguage::English => "English",
         }
     }
+
+    /// Get ISO language code for storage
+    pub fn code(&self) -> &'static str {
+        match self {
+            TranscriptionLanguage::Auto => "auto",
+            TranscriptionLanguage::French => "fr",
+            TranscriptionLanguage::English => "en",
+        }
+    }
 }
 
 /// Token spécial pour le blank (pas de sortie)
@@ -332,7 +341,7 @@ impl ParakeetEngine {
                     source_type: source_type.to_string(),
                     source_name,
                     duration_ms,
-                    language: "en".to_string(),
+                    language: language.code().to_string(),
                     segments,
                     raw_text: text,
                     edited_text: None,

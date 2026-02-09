@@ -25,7 +25,7 @@ export interface TranscriptionSettings {
 }
 
 export const DEFAULT_TRANSCRIPTION_SETTINGS: TranscriptionSettings = {
-  language: "auto",
+  language: "french",
   beamWidth: 1,
   temperature: 1.0,
   blankPenalty: 6.0,
