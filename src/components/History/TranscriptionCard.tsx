@@ -59,11 +59,18 @@ export function TranscriptionCard({
             {transcription.sourceName || "Dictee"}
           </span>
         </div>
-        <div className="flex items-center gap-1 text-xs text-[var(--color-text-muted)]">
-          <span>{time}</span>
-          <span>-</span>
-          <span>{formatDuration(transcription.durationMs)}</span>
-        </div>
+        <span className="text-xs text-[var(--color-text-muted)] shrink-0">{time}</span>
+      </div>
+
+      <div className="mt-1 flex items-center gap-1 text-xs text-[var(--color-text-muted)]">
+        <span>{formatDuration(transcription.durationMs)}</span>
+        {transcription.processingTimeMs > 0 && (
+          <>
+            <span>&middot;</span>
+            <span>{(transcription.processingTimeMs / 1000).toFixed(1)}s</span>
+            <span>({(transcription.durationMs / Math.max(transcription.processingTimeMs, 1)).toFixed(1)}x)</span>
+          </>
+        )}
       </div>
 
       <p className="mt-2 text-xs text-[var(--color-text-secondary)] line-clamp-2">

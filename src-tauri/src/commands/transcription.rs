@@ -134,13 +134,14 @@ pub async fn transcribe_file(
     let engine = engine_state.0.lock();
     let transcription = engine.transcribe(&normalized, "file", file_name, lang, decoding_config)?;
 
-    // Final progress
+    // Final progress with real speed factor
+    let speed_factor = transcription.duration_ms as f64 / transcription.processing_time_ms.max(1) as f64;
     let _ = window.emit(
         "transcription-progress",
         TranscriptionProgress {
             current_ms: total_ms,
             total_ms,
-            speed_factor: 4.0, // Mock speed
+            speed_factor,
         },
     );
 

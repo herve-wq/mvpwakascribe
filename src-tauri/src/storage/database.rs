@@ -25,6 +25,12 @@ pub fn init_database() -> Result<()> {
     // Run migrations
     conn.execute_batch(include_str!("../../migrations/001_init.sql"))?;
 
+    // Add processing_time_ms column (silent error if already exists)
+    let _ = conn.execute(
+        "ALTER TABLE transcriptions ADD COLUMN processing_time_ms INTEGER DEFAULT 0",
+        [],
+    );
+
     DB.set(Mutex::new(conn))
         .map_err(|_| AppError::InvalidState("Database already initialized".into()))?;
 

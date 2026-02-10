@@ -2,6 +2,15 @@
 
 Offline speech-to-text desktop application for macOS using NVIDIA Parakeet TDT model.
 
+## Core Rules
+
+- When asked to plan, analyze, document, or review — do NOT write or modify code unless explicitly asked. Wait for explicit confirmation before implementing.
+- Always check which layer (TypeScript frontend or Rust backend) a change belongs to before editing.
+- When the user reports an error or bug, investigate the root cause deeply before proposing workarounds. Do not dismiss user-reported issues as user error or surface-level problems.
+- After making changes to build scripts, JSON config files (especially `tauri.conf.json`), or shell scripts, always validate them (e.g., `cargo build`, `jq . < tauri.conf.json`, `bash -n script.sh`) before considering the task done.
+- For git operations, always verify the current working directory is the actual git repository root (check for `.git` directory) before running git commands.
+- When creating session summaries or context documents for future sessions, save them to the `docs/` directory as markdown files. Include: current state, what was accomplished, known issues, and next steps.
+
 ## Tech Stack
 
 - **Framework**: Tauri 2.x (Rust backend + React frontend)

@@ -7,8 +7,8 @@ use rusqlite::{params, Connection};
 pub fn insert_transcription(conn: &Connection, t: &Transcription) -> Result<()> {
     conn.execute(
         r#"
-        INSERT INTO transcriptions (id, created_at, updated_at, source_type, source_name, duration_ms, language, raw_text, edited_text, is_edited)
-        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
+        INSERT INTO transcriptions (id, created_at, updated_at, source_type, source_name, duration_ms, language, raw_text, edited_text, is_edited, processing_time_ms)
+        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
         "#,
         params![
             t.id,
@@ -20,7 +20,8 @@ pub fn insert_transcription(conn: &Connection, t: &Transcription) -> Result<()> 
             t.language,
             t.raw_text,
             t.edited_text,
-            t.is_edited as i32
+            t.is_edited as i32,
+            t.processing_time_ms
         ],
     )?;
 
@@ -41,7 +42,7 @@ pub fn insert_transcription(conn: &Connection, t: &Transcription) -> Result<()> 
 pub fn get_transcription(conn: &Connection, id: &str) -> Result<Option<Transcription>> {
     let mut stmt = conn.prepare(
         r#"
-        SELECT id, created_at, updated_at, source_type, source_name, duration_ms, language, raw_text, edited_text, is_edited
+        SELECT id, created_at, updated_at, source_type, source_name, duration_ms, language, raw_text, edited_text, is_edited, processing_time_ms
         FROM transcriptions
         WHERE id = ?1
         "#,
@@ -62,7 +63,7 @@ pub fn get_transcription(conn: &Connection, id: &str) -> Result<Option<Transcrip
 pub fn list_transcriptions(conn: &Connection) -> Result<Vec<Transcription>> {
     let mut stmt = conn.prepare(
         r#"
-        SELECT id, created_at, updated_at, source_type, source_name, duration_ms, language, raw_text, edited_text, is_edited
+        SELECT id, created_at, updated_at, source_type, source_name, duration_ms, language, raw_text, edited_text, is_edited, processing_time_ms
         FROM transcriptions
         ORDER BY created_at DESC
         "#,
@@ -92,6 +93,7 @@ fn row_to_transcription(row: &rusqlite::Row) -> rusqlite::Result<Transcription> 
         raw_text: row.get(7)?,
         edited_text: row.get(8)?,
         is_edited: row.get::<_, i32>(9)? != 0,
+        processing_time_ms: row.get(10).unwrap_or(0),
         segments: vec![],
     })
 }

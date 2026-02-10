@@ -241,8 +241,11 @@ pub fn run() {
     fn detect_best_backend(openvino_ok: bool) -> String {
         #[cfg(target_os = "macos")]
         {
-            // On macOS, prefer CoreML if models are available
-            if get_model_path(engine::EngineBackend::CoreML).is_some() {
+            // On macOS ARM (Apple Silicon), prefer CoreML (Neural Engine)
+            // On macOS Intel, fall through to OpenVINO (faster with INT8)
+            if std::env::consts::ARCH == "aarch64"
+                && get_model_path(engine::EngineBackend::CoreML).is_some()
+            {
                 return "coreml".to_string();
             }
         }

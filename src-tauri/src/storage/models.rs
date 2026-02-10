@@ -24,6 +24,7 @@ pub struct Transcription {
     pub raw_text: String,
     pub edited_text: Option<String>,
     pub is_edited: bool,
+    pub processing_time_ms: i64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

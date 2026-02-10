@@ -10,6 +10,7 @@ use once_cell::sync::Lazy;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use std::path::Path;
+use std::time::Instant;
 use tracing::{debug, info, warn};
 use uuid::Uuid;
 
@@ -260,8 +261,12 @@ impl DynamicEngine {
             config.temperature
         );
 
+        let start = Instant::now();
         match self.engine.run_inference(samples, language, &config) {
             Ok(text) => {
+                let processing_time_ms = start.elapsed().as_millis() as i64;
+                info!("Inference completed in {} ms", processing_time_ms);
+
                 let now = chrono::Utc::now().to_rfc3339();
                 let segments = vec![Segment {
                     id: Uuid::new_v4().to_string(),
@@ -283,6 +288,7 @@ impl DynamicEngine {
                     raw_text: text,
                     edited_text: None,
                     is_edited: false,
+                    processing_time_ms,
                 })
             }
             Err(e) => {
@@ -321,6 +327,7 @@ impl DynamicEngine {
             raw_text: mock_text,
             edited_text: None,
             is_edited: false,
+            processing_time_ms: 0,
         })
     }
 }

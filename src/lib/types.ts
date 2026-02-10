@@ -51,6 +51,7 @@ export interface Transcription {
   rawText: string;
   editedText?: string;
   isEdited: boolean;
+  processingTimeMs: number;
 }
 
 export interface AudioDevice {

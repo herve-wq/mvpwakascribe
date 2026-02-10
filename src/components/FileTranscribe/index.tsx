@@ -259,6 +259,12 @@ export function FileTranscribe() {
               <span className="font-medium text-[var(--color-text-primary)]">
                 Transcription terminee
               </span>
+              {result.processingTimeMs > 0 && (
+                <span className="text-sm text-[var(--color-text-muted)]">
+                  {" "}&mdash; {(result.processingTimeMs / 1000).toFixed(1)}s
+                  ({(result.durationMs / Math.max(result.processingTimeMs, 1)).toFixed(1)}x temps reel)
+                </span>
+              )}
             </div>
             <button
               onClick={handleReset}
