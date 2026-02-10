@@ -118,13 +118,13 @@ pub fn duration_ms(samples: &[f32], sample_rate: u32) -> i64 {
     ((samples.len() as f64 / sample_rate as f64) * 1000.0) as i64
 }
 
-/// Calculate RMS (Root Mean Square) of audio samples
+/// Calculate RMS (Root Mean Square) of audio samples (f64 precision)
 pub fn calculate_rms(samples: &[f32]) -> f32 {
     if samples.is_empty() {
         return 0.0;
     }
-    let sum_squares: f32 = samples.iter().map(|s| s * s).sum();
-    (sum_squares / samples.len() as f32).sqrt()
+    let sum_sq: f64 = samples.iter().map(|&s| (s as f64) * (s as f64)).sum();
+    (sum_sq / samples.len() as f64).sqrt() as f32
 }
 
 /// Normalize audio to target RMS level

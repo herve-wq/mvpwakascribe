@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { PanelHeader } from "../ui/PanelHeader";
 import { SegmentList } from "./SegmentList";
 import { ExportMenu } from "./ExportMenu";
 import { useTranscription } from "../../hooks/useTranscription";
@@ -40,17 +41,11 @@ export function Editor({ transcription, onClose }: EditorProps) {
 
   return (
     <div className="h-full flex flex-col">
-      {/* Header */}
-      <div className="p-4 border-b border-[var(--color-border)] flex items-center justify-between">
-        <div>
-          <h2 className="font-semibold text-[var(--color-text-primary)]">
-            {transcription.sourceName || "Dictee"}
-          </h2>
-          <p className="text-xs text-[var(--color-text-muted)]">
-            {new Date(transcription.createdAt).toLocaleString("fr-FR")}
-          </p>
-        </div>
-        <div className="flex items-center gap-2">
+      <PanelHeader
+        title={transcription.sourceName || "Dictee"}
+        subtitle={new Date(transcription.createdAt).toLocaleString("fr-FR")}
+        onClose={onClose}
+        actions={
           <button
             onClick={() => setShowSegments(!showSegments)}
             className={`px-3 py-1.5 rounded text-sm transition-colors ${
@@ -61,28 +56,8 @@ export function Editor({ transcription, onClose }: EditorProps) {
           >
             Segments
           </button>
-          {onClose && (
-            <button
-              onClick={onClose}
-              className="p-1.5 rounded hover:bg-[var(--color-bg-tertiary)]"
-            >
-              <svg
-                className="w-5 h-5 text-[var(--color-text-muted)]"
-                fill="none"
-                stroke="currentColor"
-                viewBox="0 0 24 24"
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={2}
-                  d="M6 18L18 6M6 6l12 12"
-                />
-              </svg>
-            </button>
-          )}
-        </div>
-      </div>
+        }
+      />
 
       {/* Content */}
       <div className="flex-1 overflow-auto p-4">
@@ -111,7 +86,7 @@ export function Editor({ transcription, onClose }: EditorProps) {
           {hasChanges && (
             <button
               onClick={handleSave}
-              className="px-4 py-2 rounded-lg bg-[var(--color-bg-tertiary)] hover:bg-[var(--color-border)] text-sm transition-colors"
+              className="btn-secondary"
             >
               Enregistrer
             </button>

@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { CopyButton } from "../ui/CopyButton";
 import { DropZone } from "./DropZone";
 import { ProgressBar } from "./ProgressBar";
 import { useTranscription } from "../../hooks/useTranscription";
@@ -267,7 +268,7 @@ export function FileTranscribe() {
             </button>
           </div>
 
-          <div className="flex-1 bg-[var(--color-bg-secondary)] rounded-lg border border-[var(--color-border)] overflow-auto">
+          <div className="flex-1 panel overflow-auto">
             <div className="p-4">
               <p className="text-[var(--color-text-primary)] whitespace-pre-wrap">
                 {result.rawText}
@@ -276,25 +277,7 @@ export function FileTranscribe() {
           </div>
 
           <div className="flex items-center justify-end gap-3">
-            <button
-              onClick={handleCopy}
-              className="flex items-center gap-2 px-4 py-2 rounded-lg bg-[var(--color-bg-tertiary)] hover:bg-[var(--color-border)] transition-colors"
-            >
-              <svg
-                className="w-4 h-4"
-                fill="none"
-                stroke="currentColor"
-                viewBox="0 0 24 24"
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={2}
-                  d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"
-                />
-              </svg>
-              <span className="text-sm">Copier</span>
-            </button>
+            <CopyButton onClick={handleCopy} />
           </div>
         </>
       )}

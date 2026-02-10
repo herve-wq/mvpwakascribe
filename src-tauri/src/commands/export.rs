@@ -6,21 +6,13 @@ use tauri_plugin_clipboard_manager::ClipboardExt;
 
 #[tauri::command]
 pub fn export_to_txt(id: String, path: String) -> Result<()> {
-    let transcription = storage::with_db(|conn| {
-        storage::get_transcription(conn, &id)?
-            .ok_or_else(|| AppError::NotFound(format!("Transcription not found: {}", id)))
-    })?;
-
+    let transcription = storage::with_db(|conn| storage::get_transcription_or_error(conn, &id))?;
     export::export_to_txt(&transcription, &PathBuf::from(path))
 }
 
 #[tauri::command]
 pub fn export_to_docx(id: String, path: String) -> Result<()> {
-    let transcription = storage::with_db(|conn| {
-        storage::get_transcription(conn, &id)?
-            .ok_or_else(|| AppError::NotFound(format!("Transcription not found: {}", id)))
-    })?;
-
+    let transcription = storage::with_db(|conn| storage::get_transcription_or_error(conn, &id))?;
     export::export_to_docx(&transcription, &PathBuf::from(path))
 }
 

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef } from "react";
 import { listen, UnlistenFn } from "@tauri-apps/api/event";
 import { useAppStore } from "../stores/appStore";
+import { getDecodingConfig } from "../lib/config";
 import {
   startRecording as tauriStartRecording,
   stopRecording as tauriStopRecording,
@@ -8,7 +9,7 @@ import {
   resumeRecording as tauriResumeRecording,
   getAudioLevel as tauriGetAudioLevel,
 } from "../lib/tauri";
-import type { Segment, StreamingSegment, DecodingConfig } from "../lib/types";
+import type { Segment, StreamingSegment } from "../lib/types";
 
 export function useRecording() {
   const {
@@ -26,13 +27,6 @@ export function useRecording() {
     clearCurrentTranscription,
     addTranscription,
   } = useAppStore();
-
-  // Build DecodingConfig from settings
-  const getDecodingConfig = useCallback((): DecodingConfig => ({
-    beam_width: settings.transcription.beamWidth,
-    temperature: settings.transcription.temperature,
-    blank_penalty: settings.transcription.blankPenalty,
-  }), [settings.transcription]);
 
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const unlistenRefs = useRef<UnlistenFn[]>([]);
@@ -132,7 +126,7 @@ export function useRecording() {
       setRecordingState("processing");
       // Use global settings for language and decoding config
       const language = settings.transcription.language;
-      const decodingConfig = getDecodingConfig();
+      const decodingConfig = getDecodingConfig(settings.transcription);
       const transcription = await tauriStopRecording(language, decodingConfig);
       addTranscription(transcription);
       setRecordingState("idle");
@@ -142,7 +136,7 @@ export function useRecording() {
       setRecordingState("idle");
       return null;
     }
-  }, [setRecordingState, addTranscription, settings.transcription, getDecodingConfig]);
+  }, [setRecordingState, addTranscription, settings.transcription]);
 
   const pause = useCallback(async () => {
     try {

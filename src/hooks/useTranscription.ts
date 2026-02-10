@@ -1,6 +1,7 @@
 import { useCallback } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { useAppStore } from "../stores/appStore";
+import { getDecodingConfig } from "../lib/config";
 import {
   listTranscriptions,
   getTranscription,
@@ -12,17 +13,10 @@ import {
   exportToDocx,
   copyToClipboard,
 } from "../lib/tauri";
-import type { Transcription, TranscriptionProgress, DecodingConfig } from "../lib/types";
+import type { Transcription, TranscriptionProgress } from "../lib/types";
 
 export function useTranscription() {
   const { transcriptions, setTranscriptions, addTranscription, settings } = useAppStore();
-
-  // Build DecodingConfig from settings
-  const getDecodingConfig = useCallback((): DecodingConfig => ({
-    beam_width: settings.transcription.beamWidth,
-    temperature: settings.transcription.temperature,
-    blank_penalty: settings.transcription.blankPenalty,
-  }), [settings.transcription]);
 
   const loadTranscriptions = useCallback(async () => {
     try {
@@ -52,7 +46,7 @@ export function useTranscription() {
 
         // Use global settings for language and decoding config
         const language = settings.transcription.language;
-        const decodingConfig = getDecodingConfig();
+        const decodingConfig = getDecodingConfig(settings.transcription);
 
         const transcription = await tauriTranscribeFile(filePath, language, decodingConfig);
         addTranscription(transcription);
@@ -67,7 +61,7 @@ export function useTranscription() {
         return null;
       }
     },
-    [addTranscription, settings.transcription, getDecodingConfig]
+    [addTranscription, settings.transcription]
   );
 
   const deleteTranscription = useCallback(
@@ -136,6 +130,5 @@ export function useTranscription() {
     copyText,
     // Expose transcription settings for components that need them
     transcriptionSettings: settings.transcription,
-    getDecodingConfig,
   };
 }

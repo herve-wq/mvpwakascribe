@@ -75,6 +75,52 @@ body {
   background: var(--color-text-muted);
 }
 
+/* Reusable component classes */
+@layer components {
+  /* Secondary/ghost button */
+  .btn-secondary {
+    @apply flex items-center gap-2 px-4 py-2 rounded-lg text-sm transition-colors;
+    background-color: var(--color-bg-tertiary);
+    &:hover { background-color: var(--color-border); }
+    &:disabled { @apply opacity-50 cursor-not-allowed; }
+  }
+
+  /* Primary/accent button */
+  .btn-primary {
+    @apply flex items-center gap-2 px-4 py-2 rounded-lg text-sm text-white transition-colors;
+    background-color: var(--color-accent);
+    &:hover { background-color: var(--color-accent-hover); }
+    &:disabled { @apply opacity-50 cursor-not-allowed; }
+  }
+
+  /* Panel/card container */
+  .panel {
+    @apply rounded-lg border;
+    background-color: var(--color-bg-secondary);
+    border-color: var(--color-border);
+  }
+
+  /* Toggle button pair - inactive state */
+  .btn-toggle {
+    @apply flex-1 px-3 py-2 rounded-lg text-sm font-medium transition-colors;
+    background-color: var(--color-bg-tertiary);
+    color: var(--color-text-secondary);
+    &:hover { background-color: var(--color-border); }
+  }
+
+  /* Toggle button pair - active state */
+  .btn-toggle-active {
+    @apply flex-1 px-3 py-2 rounded-lg text-sm font-medium transition-colors text-white;
+    background-color: var(--color-accent);
+  }
+
+  /* Dropdown menu item */
+  .menu-item {
+    @apply w-full px-4 py-2 text-left text-sm flex items-center gap-2;
+    &:hover { background-color: var(--color-bg-secondary); }
+  }
+}
+
 /* Draggable region for custom titlebar */
 .titlebar-drag {
   -webkit-app-region: drag;

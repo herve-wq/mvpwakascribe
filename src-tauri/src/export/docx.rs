@@ -1,3 +1,4 @@
+use super::{format_duration, format_timestamp};
 use crate::error::{AppError, Result};
 use crate::storage::Transcription;
 use docx_rs::*;
@@ -77,16 +78,3 @@ pub fn export_to_docx(transcription: &Transcription, path: &Path) -> Result<()> 
     Ok(())
 }
 
-fn format_duration(ms: i64) -> String {
-    let total_seconds = ms / 1000;
-    let minutes = total_seconds / 60;
-    let seconds = total_seconds % 60;
-    format!("{}:{:02}", minutes, seconds)
-}
-
-fn format_timestamp(ms: i64) -> String {
-    let total_seconds = ms / 1000;
-    let minutes = total_seconds / 60;
-    let seconds = total_seconds % 60;
-    format!("{:02}:{:02}", minutes, seconds)
-}

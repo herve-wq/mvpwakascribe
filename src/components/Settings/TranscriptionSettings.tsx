@@ -1,3 +1,4 @@
+import { RangeSlider } from "../ui/RangeSlider";
 import { useAppStore } from "../../stores/appStore";
 import { TRANSCRIPTION_LANGUAGES } from "../../lib/types";
 import type { TranscriptionLanguage } from "../../lib/types";
@@ -86,21 +87,13 @@ export function TranscriptionSettings() {
         <div className="flex gap-2">
           <button
             onClick={() => handleBeamWidthChange(1)}
-            className={`flex-1 px-3 py-2 rounded-lg text-sm font-medium transition-colors
-              ${!isBeamSearch
-                ? "bg-[var(--color-accent)] text-white"
-                : "bg-[var(--color-bg-tertiary)] text-[var(--color-text-secondary)] hover:bg-[var(--color-border)]"
-              }`}
+            className={!isBeamSearch ? "btn-toggle-active" : "btn-toggle"}
           >
             Rapide
           </button>
           <button
             onClick={() => handleBeamWidthChange(5)}
-            className={`flex-1 px-3 py-2 rounded-lg text-sm font-medium transition-colors
-              ${isBeamSearch
-                ? "bg-[var(--color-accent)] text-white"
-                : "bg-[var(--color-bg-tertiary)] text-[var(--color-text-secondary)] hover:bg-[var(--color-border)]"
-              }`}
+            className={isBeamSearch ? "btn-toggle-active" : "btn-toggle"}
           >
             Precis
           </button>
@@ -116,80 +109,43 @@ export function TranscriptionSettings() {
 
       {/* Advanced: Beam width slider (only shown in precise mode) */}
       {isBeamSearch && (
-        <div className="space-y-2">
-          <div className="flex justify-between">
-            <label className="text-sm text-[var(--color-text-secondary)]">
-              Beam width
-            </label>
-            <span className="text-sm text-[var(--color-text-muted)]">
-              {transcription.beamWidth}
-            </span>
-          </div>
-          <input
-            type="range"
-            min="2"
-            max="10"
-            step="1"
-            value={transcription.beamWidth}
-            onChange={(e) => handleBeamWidthChange(parseInt(e.target.value))}
-            className="w-full accent-[var(--color-accent)]"
-          />
-          <div className="flex justify-between text-xs text-[var(--color-text-muted)]">
-            <span>2</span>
-            <span>10</span>
-          </div>
-        </div>
+        <RangeSlider
+          label="Beam width"
+          value={transcription.beamWidth}
+          min={2}
+          max={10}
+          step={1}
+          onChange={handleBeamWidthChange}
+          minLabel="2"
+          maxLabel="10"
+        />
       )}
 
       {/* Temperature slider */}
-      <div className="space-y-2">
-        <div className="flex justify-between">
-          <label className="text-sm text-[var(--color-text-secondary)]">
-            Temperature
-          </label>
-          <span className="text-sm text-[var(--color-text-muted)]">
-            {transcription.temperature.toFixed(1)}
-          </span>
-        </div>
-        <input
-          type="range"
-          min="0.1"
-          max="1.5"
-          step="0.1"
-          value={transcription.temperature}
-          onChange={(e) => handleTemperatureChange(parseFloat(e.target.value))}
-          className="w-full accent-[var(--color-accent)]"
-        />
-        <div className="flex justify-between text-xs text-[var(--color-text-muted)]">
-          <span>Conservateur</span>
-          <span>Creatif</span>
-        </div>
-      </div>
+      <RangeSlider
+        label="Temperature"
+        value={transcription.temperature}
+        min={0.1}
+        max={1.5}
+        step={0.1}
+        onChange={handleTemperatureChange}
+        formatValue={(v) => v.toFixed(1)}
+        minLabel="Conservateur"
+        maxLabel="Creatif"
+      />
 
       {/* Blank penalty slider */}
-      <div className="space-y-2">
-        <div className="flex justify-between">
-          <label className="text-sm text-[var(--color-text-secondary)]">
-            Blank Penalty
-          </label>
-          <span className="text-sm text-[var(--color-text-muted)]">
-            {transcription.blankPenalty.toFixed(1)}
-          </span>
-        </div>
-        <input
-          type="range"
-          min="0"
-          max="15"
-          step="0.5"
-          value={transcription.blankPenalty}
-          onChange={(e) => handleBlankPenaltyChange(parseFloat(e.target.value))}
-          className="w-full accent-[var(--color-accent)]"
-        />
-        <div className="flex justify-between text-xs text-[var(--color-text-muted)]">
-          <span>Plus de blanks</span>
-          <span>Plus de tokens</span>
-        </div>
-      </div>
+      <RangeSlider
+        label="Blank Penalty"
+        value={transcription.blankPenalty}
+        min={0}
+        max={15}
+        step={0.5}
+        onChange={handleBlankPenaltyChange}
+        formatValue={(v) => v.toFixed(1)}
+        minLabel="Plus de blanks"
+        maxLabel="Plus de tokens"
+      />
 
       {/* Current config summary */}
       <div className="bg-[var(--color-bg-tertiary)] rounded-lg p-3 space-y-1 text-xs">

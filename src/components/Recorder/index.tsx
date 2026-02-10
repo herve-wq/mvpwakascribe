@@ -1,16 +1,11 @@
+import { formatTime } from "../../lib/formatters";
+import { CopyButton } from "../ui/CopyButton";
 import { WaveformDisplay } from "./WaveformDisplay";
 import { RecordingControls } from "./RecordingControls";
 import { ConfidenceIndicator } from "./ConfidenceIndicator";
 import { useRecording } from "../../hooks/useRecording";
 import { useAudioDevices } from "../../hooks/useAudioDevices";
 import { useTranscription } from "../../hooks/useTranscription";
-
-function formatTimestamp(ms: number): string {
-  const totalSeconds = Math.floor(ms / 1000);
-  const minutes = Math.floor(totalSeconds / 60);
-  const seconds = totalSeconds % 60;
-  return `${minutes.toString().padStart(2, "0")}:${seconds.toString().padStart(2, "0")}`;
-}
 
 export function Recorder() {
   const { segments, pendingText } = useRecording();
@@ -64,7 +59,7 @@ export function Recorder() {
       <RecordingControls />
 
       {/* Transcription display */}
-      <div className="flex-1 bg-[var(--color-bg-secondary)] rounded-lg border border-[var(--color-border)] overflow-auto">
+      <div className="flex-1 panel overflow-auto">
         <div className="p-4 space-y-4">
           {segments.length === 0 && !pendingText ? (
             <p className="text-[var(--color-text-muted)] text-center py-8">
@@ -76,7 +71,7 @@ export function Recorder() {
                 <div key={segment.id} className="space-y-1">
                   <div className="flex items-start gap-3">
                     <span className="text-xs text-[var(--color-text-muted)] font-mono mt-1">
-                      [{formatTimestamp(segment.startMs)}]
+                      [{formatTime(segment.startMs)}]
                     </span>
                     <p className="flex-1 text-[var(--color-text-primary)]">
                       {segment.text}
@@ -106,26 +101,7 @@ export function Recorder() {
 
       {/* Action buttons */}
       <div className="flex items-center justify-end gap-3">
-        <button
-          onClick={handleCopy}
-          disabled={!fullText}
-          className="flex items-center gap-2 px-4 py-2 rounded-lg bg-[var(--color-bg-tertiary)] hover:bg-[var(--color-border)] disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-        >
-          <svg
-            className="w-4 h-4"
-            fill="none"
-            stroke="currentColor"
-            viewBox="0 0 24 24"
-          >
-            <path
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              strokeWidth={2}
-              d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"
-            />
-          </svg>
-          <span className="text-sm">Copier</span>
-        </button>
+        <CopyButton onClick={handleCopy} disabled={!fullText} />
       </div>
     </div>
   );

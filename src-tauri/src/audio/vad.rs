@@ -3,6 +3,7 @@
 //! Simple energy-based VAD for finding silence points in audio.
 //! Used to split audio at natural pauses instead of mid-word.
 
+use super::processor::calculate_rms;
 use tracing::debug;
 
 /// Sample rate (fixed at 16kHz for Parakeet)
@@ -66,7 +67,7 @@ pub fn analyze_audio(samples: &[f32], config: &VadConfig) -> Vec<VadFrame> {
 
     while pos + config.window_samples <= samples.len() {
         let window = &samples[pos..pos + config.window_samples];
-        let rms = compute_rms(window);
+        let rms = calculate_rms(window);
         let is_silence = rms < config.silence_threshold;
 
         frames.push(VadFrame {
@@ -115,7 +116,7 @@ pub fn find_best_cut_point(
     let mut pos = search_start;
     while pos + config.window_samples <= search_end {
         let window = &samples[pos..pos + config.window_samples];
-        let rms = compute_rms(window);
+        let rms = calculate_rms(window);
 
         // Prefer silence points
         if rms < config.silence_threshold {
@@ -175,15 +176,6 @@ pub fn find_silence_regions(samples: &[f32], config: &VadConfig) -> Vec<(usize, 
     }
 
     regions
-}
-
-/// Compute RMS (Root Mean Square) energy of audio samples
-fn compute_rms(samples: &[f32]) -> f32 {
-    if samples.is_empty() {
-        return 0.0;
-    }
-    let sum_sq: f64 = samples.iter().map(|&s| (s as f64) * (s as f64)).sum();
-    (sum_sq / samples.len() as f64).sqrt() as f32
 }
 
 #[cfg(test)]

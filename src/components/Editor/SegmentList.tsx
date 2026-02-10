@@ -1,16 +1,10 @@
+import { formatTime } from "../../lib/formatters";
 import type { Segment } from "../../lib/types";
 import { ConfidenceIndicator } from "../Recorder/ConfidenceIndicator";
 
 interface SegmentListProps {
   segments: Segment[];
   onSegmentClick?: (segment: Segment) => void;
-}
-
-function formatTimestamp(ms: number): string {
-  const totalSeconds = Math.floor(ms / 1000);
-  const minutes = Math.floor(totalSeconds / 60);
-  const seconds = totalSeconds % 60;
-  return `${minutes.toString().padStart(2, "0")}:${seconds.toString().padStart(2, "0")}`;
 }
 
 export function SegmentList({ segments, onSegmentClick }: SegmentListProps) {
@@ -26,7 +20,7 @@ export function SegmentList({ segments, onSegmentClick }: SegmentListProps) {
         >
           <div className="flex items-start gap-3">
             <span className="text-xs text-[var(--color-text-muted)] font-mono shrink-0">
-              [{formatTimestamp(segment.startMs)}]
+              [{formatTime(segment.startMs)}]
             </span>
             <p className="flex-1 text-[var(--color-text-primary)]">{segment.text}</p>
           </div>

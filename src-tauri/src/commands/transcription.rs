@@ -1,4 +1,4 @@
-use crate::audio::{duration_ms, load_audio_file, normalize_audio, resample_to_16k};
+use crate::audio::{duration_ms, load_audio_file, prepare_audio};
 use crate::commands::audio::AudioState;
 use crate::engine::{DecodingConfig, DynamicEngine, EngineBackend, TranscriptionLanguage};
 use crate::error::{AppError, Result};
@@ -62,11 +62,8 @@ pub fn stop_recording(
     let samples = audio_state.0.stop()?;
     let sample_rate = audio_state.0.sample_rate();
 
-    // Resample to 16kHz
-    let resampled = resample_to_16k(&samples, sample_rate)?;
-
-    // Normalize audio level for consistent transcription
-    let (normalized, _gain) = normalize_audio(&resampled);
+    // Resample to 16kHz and normalize
+    let normalized = prepare_audio(&samples, sample_rate)?;
 
     // Use provided language or default to Auto
     let lang = language.unwrap_or_default();
@@ -130,11 +127,8 @@ pub async fn transcribe_file(
         },
     );
 
-    // Resample to 16kHz
-    let resampled = resample_to_16k(&samples, sample_rate)?;
-
-    // Normalize audio level for consistent transcription
-    let (normalized, _gain) = normalize_audio(&resampled);
+    // Resample to 16kHz and normalize
+    let normalized = prepare_audio(&samples, sample_rate)?;
 
     // Transcribe
     let engine = engine_state.0.lock();
@@ -158,10 +152,7 @@ pub async fn transcribe_file(
 
 #[tauri::command]
 pub fn get_transcription(id: String) -> Result<Transcription> {
-    storage::with_db(|conn| {
-        storage::get_transcription(conn, &id)?
-            .ok_or_else(|| AppError::NotFound(format!("Transcription not found: {}", id)))
-    })
+    storage::with_db(|conn| storage::get_transcription_or_error(conn, &id))
 }
 
 /// Switch to a different inference backend

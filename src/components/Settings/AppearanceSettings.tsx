@@ -27,31 +27,19 @@ export function AppearanceSettings() {
         <div className="flex gap-2">
           <button
             onClick={() => setTheme("light")}
-            className={`flex-1 py-2 px-3 rounded-lg text-sm transition-colors ${
-              theme === "light"
-                ? "bg-[var(--color-accent)] text-white"
-                : "bg-[var(--color-bg-tertiary)] hover:bg-[var(--color-border)] text-[var(--color-text-primary)]"
-            }`}
+            className={theme === "light" ? "btn-toggle-active" : "btn-toggle"}
           >
             Clair
           </button>
           <button
             onClick={() => setTheme("dark")}
-            className={`flex-1 py-2 px-3 rounded-lg text-sm transition-colors ${
-              theme === "dark"
-                ? "bg-[var(--color-accent)] text-white"
-                : "bg-[var(--color-bg-tertiary)] hover:bg-[var(--color-border)] text-[var(--color-text-primary)]"
-            }`}
+            className={theme === "dark" ? "btn-toggle-active" : "btn-toggle"}
           >
             Sombre
           </button>
           <button
             onClick={() => setTheme("system")}
-            className={`flex-1 py-2 px-3 rounded-lg text-sm transition-colors ${
-              theme === "system"
-                ? "bg-[var(--color-accent)] text-white"
-                : "bg-[var(--color-bg-tertiary)] hover:bg-[var(--color-border)] text-[var(--color-text-primary)]"
-            }`}
+            className={theme === "system" ? "btn-toggle-active" : "btn-toggle"}
           >
             Systeme
           </button>

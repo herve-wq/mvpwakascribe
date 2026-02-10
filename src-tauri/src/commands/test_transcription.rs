@@ -7,7 +7,8 @@
 //! 1. Commenter la ligne `pub mod test_transcription;` dans commands/mod.rs
 //! 2. Commenter l'enregistrement de la commande dans lib.rs
 
-use crate::audio::{load_audio_file, normalize_audio, resample_to_16k};
+use crate::audio::{load_audio_file, prepare_audio};
+use crate::audio::processor::calculate_rms;
 use crate::commands::EngineState;
 use crate::engine::TranscriptionLanguage;
 use crate::error::{AppError, Result};
@@ -84,15 +85,6 @@ fn find_test_audio() -> Result<PathBuf> {
     ))
 }
 
-/// Calcule le RMS d'un signal audio
-fn compute_rms(samples: &[f32]) -> f32 {
-    if samples.is_empty() {
-        return 0.0;
-    }
-    let sum_sq: f64 = samples.iter().map(|&s| (s as f64) * (s as f64)).sum();
-    (sum_sq / samples.len() as f64).sqrt() as f32
-}
-
 /// Commande Tauri pour tester la transcription avec le fichier de référence
 ///
 /// Cette commande:
@@ -116,19 +108,15 @@ pub fn test_transcription(
     info!("Audio loaded in {:?}: {} samples @ {}Hz", load_time, samples.len(), sample_rate);
 
     // Calculer les métriques audio
-    let audio_rms = compute_rms(&samples);
+    let audio_rms = calculate_rms(&samples);
     let audio_duration_ms = (samples.len() as f64 / sample_rate as f64 * 1000.0) as i64;
     info!("Audio: duration={}ms, rms={:.4}", audio_duration_ms, audio_rms);
 
-    // Resampler à 16kHz
-    let resample_start = Instant::now();
-    let resampled = resample_to_16k(&samples, sample_rate)?;
-    let resample_time = resample_start.elapsed();
-    info!("Resampled in {:?}: {} -> {} samples", resample_time, samples.len(), resampled.len());
-
-    // Normaliser le niveau audio
-    let (normalized, gain) = normalize_audio(&resampled);
-    info!("Audio normalized with gain {:.1}x", gain);
+    // Resampler à 16kHz et normaliser
+    let prep_start = Instant::now();
+    let normalized = prepare_audio(&samples, sample_rate)?;
+    let prep_time = prep_start.elapsed();
+    info!("Audio prepared in {:?}: {} -> {} samples", prep_time, samples.len(), normalized.len());
 
     // Transcrire (utilise Auto pour la détection automatique de langue, greedy decoding)
     let transcribe_start = Instant::now();

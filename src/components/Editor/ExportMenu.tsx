@@ -60,7 +60,7 @@ export function ExportMenu({
       <button
         onClick={() => setIsOpen(!isOpen)}
         disabled={disabled}
-        className="flex items-center gap-2 px-4 py-2 rounded-lg bg-[var(--color-accent)] text-white hover:bg-[var(--color-accent-hover)] disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+        className="btn-primary"
       >
         <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path
@@ -85,7 +85,7 @@ export function ExportMenu({
         <div className="absolute right-0 mt-2 w-48 bg-[var(--color-bg-primary)] border border-[var(--color-border)] rounded-lg shadow-lg overflow-hidden z-10">
           <button
             onClick={handleCopy}
-            className="w-full px-4 py-2 text-left text-sm hover:bg-[var(--color-bg-secondary)] flex items-center gap-2"
+            className="menu-item"
           >
             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path
@@ -99,7 +99,7 @@ export function ExportMenu({
           </button>
           <button
             onClick={handleExportTxt}
-            className="w-full px-4 py-2 text-left text-sm hover:bg-[var(--color-bg-secondary)] flex items-center gap-2"
+            className="menu-item"
           >
             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path
@@ -113,7 +113,7 @@ export function ExportMenu({
           </button>
           <button
             onClick={handleExportDocx}
-            className="w-full px-4 py-2 text-left text-sm hover:bg-[var(--color-bg-secondary)] flex items-center gap-2"
+            className="menu-item"
           >
             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path

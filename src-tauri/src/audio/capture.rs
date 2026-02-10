@@ -1,3 +1,4 @@
+use super::processor::calculate_rms;
 use crate::error::{AppError, Result};
 use crate::storage::AudioDevice;
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
@@ -381,9 +382,7 @@ where
                 }
 
                 // Calculate audio level (RMS) with gain boost for visualization
-                let sum: f32 = data.iter().map(|s| s * s).sum();
-                let rms = (sum / data.len() as f32).sqrt();
-                // Apply gain (10x) and use sqrt for more visual range
+                let rms = calculate_rms(data);
                 let boosted = (rms * 10.0).sqrt().min(1.0);
                 *audio_level.lock() = boosted;
 
@@ -426,9 +425,7 @@ where
                 let samples: Vec<f32> = data.iter().map(|&s| s as f32 / 32768.0).collect();
 
                 // Calculate audio level (RMS) with gain boost for visualization
-                let sum: f32 = samples.iter().map(|s| s * s).sum();
-                let rms = (sum / samples.len() as f32).sqrt();
-                // Apply gain (10x) and use sqrt for more visual range
+                let rms = calculate_rms(&samples);
                 let boosted = (rms * 10.0).sqrt().min(1.0);
                 *audio_level.lock() = boosted;
 

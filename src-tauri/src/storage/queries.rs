@@ -1,4 +1,4 @@
-use crate::error::Result;
+use crate::error::{AppError, Result};
 use crate::storage::models::{Segment, Settings, Transcription};
 use rusqlite::{params, Connection};
 
@@ -47,21 +47,7 @@ pub fn get_transcription(conn: &Connection, id: &str) -> Result<Option<Transcrip
         "#,
     )?;
 
-    let transcription = stmt.query_row([id], |row| {
-        Ok(Transcription {
-            id: row.get(0)?,
-            created_at: row.get(1)?,
-            updated_at: row.get(2)?,
-            source_type: row.get(3)?,
-            source_name: row.get(4)?,
-            duration_ms: row.get(5)?,
-            language: row.get(6)?,
-            raw_text: row.get(7)?,
-            edited_text: row.get(8)?,
-            is_edited: row.get::<_, i32>(9)? != 0,
-            segments: vec![],
-        })
-    });
+    let transcription = stmt.query_row([id], row_to_transcription);
 
     match transcription {
         Ok(mut t) => {
@@ -82,21 +68,7 @@ pub fn list_transcriptions(conn: &Connection) -> Result<Vec<Transcription>> {
         "#,
     )?;
 
-    let rows = stmt.query_map([], |row| {
-        Ok(Transcription {
-            id: row.get(0)?,
-            created_at: row.get(1)?,
-            updated_at: row.get(2)?,
-            source_type: row.get(3)?,
-            source_name: row.get(4)?,
-            duration_ms: row.get(5)?,
-            language: row.get(6)?,
-            raw_text: row.get(7)?,
-            edited_text: row.get(8)?,
-            is_edited: row.get::<_, i32>(9)? != 0,
-            segments: vec![],
-        })
-    })?;
+    let rows = stmt.query_map([], |row| row_to_transcription(row))?;
 
     let mut transcriptions = Vec::new();
     for row in rows {
@@ -106,6 +78,22 @@ pub fn list_transcriptions(conn: &Connection) -> Result<Vec<Transcription>> {
     }
 
     Ok(transcriptions)
+}
+
+fn row_to_transcription(row: &rusqlite::Row) -> rusqlite::Result<Transcription> {
+    Ok(Transcription {
+        id: row.get(0)?,
+        created_at: row.get(1)?,
+        updated_at: row.get(2)?,
+        source_type: row.get(3)?,
+        source_name: row.get(4)?,
+        duration_ms: row.get(5)?,
+        language: row.get(6)?,
+        raw_text: row.get(7)?,
+        edited_text: row.get(8)?,
+        is_edited: row.get::<_, i32>(9)? != 0,
+        segments: vec![],
+    })
 }
 
 fn get_segments(conn: &Connection, transcription_id: &str) -> Result<Vec<Segment>> {
@@ -129,6 +117,12 @@ fn get_segments(conn: &Connection, transcription_id: &str) -> Result<Vec<Segment
     })?;
 
     Ok(rows.collect::<std::result::Result<Vec<_>, _>>()?)
+}
+
+/// Get a transcription by ID, returning an error if not found
+pub fn get_transcription_or_error(conn: &Connection, id: &str) -> Result<Transcription> {
+    get_transcription(conn, id)?
+        .ok_or_else(|| AppError::NotFound(format!("Transcription not found: {}", id)))
 }
 
 pub fn update_transcription_text(conn: &Connection, id: &str, edited_text: &str) -> Result<()> {
