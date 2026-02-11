@@ -120,7 +120,7 @@ pub fn test_transcription(
 
     // Transcrire (utilise Auto pour la détection automatique de langue, greedy decoding)
     let transcribe_start = Instant::now();
-    let engine = engine_state.0.lock();
+    let mut engine = engine_state.0.lock();
     let transcription = engine.transcribe(
         &normalized,
         "test",

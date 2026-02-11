@@ -46,6 +46,14 @@ const HOP_LENGTH: usize = 160;
 /// Augmenter cette valeur réduit le biais vers blank
 const DEFAULT_BLANK_PENALTY: f32 = 6.0;
 
+/// Maximum non-blank tokens emitted at the same time step before forcing advance
+/// (Same as FluidAudio's maxSymbolsPerStep)
+const MAX_SYMBOLS_PER_STEP: usize = 10;
+
+/// Maximum tokens per chunk before early stopping (prevents runaway decoding)
+/// A 15s chunk can reasonably produce ~100-150 tokens max
+const MAX_TOKENS_PER_CHUNK: usize = 150;
+
 /// Beam hypothesis for beam search decoding
 #[derive(Clone)]
 struct BeamHypothesis {
@@ -61,6 +69,10 @@ struct BeamHypothesis {
     last_token: i64,
     /// Current time position in encoder output
     current_time: usize,
+    /// Last time position where a non-blank token was emitted (-1 = none)
+    last_emission_time: isize,
+    /// Number of tokens emitted at last_emission_time
+    emissions_at_time: usize,
 }
 
 /// Parakeet STT Engine using OpenVINO with 4 separate models
@@ -253,7 +265,7 @@ impl ParakeetEngine {
 
     /// Pipeline complet de transcription TDT avec support chunking
     fn run_inference(
-        &self,
+        &mut self,
         audio: &[f32],
         language: TranscriptionLanguage,
         config: &DecodingConfig,
@@ -618,6 +630,8 @@ impl ParakeetEngine {
             info!("Decoder conditioned with full language sequence, starting with BLANK");
         }
         let mut t: usize = 0;
+        let mut last_emission_t: isize = -1;
+        let mut emissions_at_t: usize = 0;
 
         // Limite de sécurité
         let max_iterations = encoder_time * 10;
@@ -626,7 +640,7 @@ impl ParakeetEngine {
         // Buffer pour extraire une frame temporelle
         let mut encoder_frame = vec![0.0f32; ENCODER_OUTPUT_DIM];
 
-        while t < encoder_time && iterations < max_iterations {
+        while t < encoder_time && iterations < max_iterations && tokens.len() < MAX_TOKENS_PER_CHUNK {
             iterations += 1;
 
             // Extraire la frame temporelle t de l'encoder output
@@ -665,6 +679,16 @@ impl ParakeetEngine {
             // Étape 3: Decode TDT output
             let (token, duration) = self.decode_tdt_output(&logits, config.temperature, config.blank_penalty);
 
+            // Protection: non-blank with dur=0 at same frame as previous emission
+            let duration = if token != BLANK_TOKEN && duration == 0
+                && t as isize == last_emission_t
+                && emissions_at_t >= 1
+            {
+                1u32
+            } else {
+                duration
+            };
+
             // Debug log for first few iterations - with logits analysis
             if iterations <= 5 || tokens.len() < 10 {
                 let vocab = self.tdt_decoder.as_ref().map(|d| d.vocab());
@@ -699,7 +723,7 @@ impl ParakeetEngine {
                 // Since blank doesn't update decoder state, we can reuse dec_out
                 // and just run joint network with new encoder frames
                 // (Same optimization as FluidAudio TdtDecoderV3.swift)
-                while t < encoder_time && iterations < max_iterations {
+                while t < encoder_time && iterations < max_iterations && tokens.len() < MAX_TOKENS_PER_CHUNK {
                     iterations += 1;
 
                     // Extract next encoder frame
@@ -724,10 +748,19 @@ impl ParakeetEngine {
                         // Still blank, keep advancing
                         t += inner_duration as usize;
                     } else {
-                        // Non-blank token found, emit it and exit inner loop
+                        // Non-blank token found in inner loop
+                        // Protection: dur=0 at same frame as previous emission
+                        let inner_duration = if inner_duration == 0
+                            && t as isize == last_emission_t
+                            && emissions_at_t >= 1
+                        {
+                            1u32
+                        } else {
+                            inner_duration
+                        };
+
                         tokens.push(inner_token);
                         last_token = inner_token as i64;
-                        // Need to update decoder state for this new token
                         let (_, inner_h, inner_c) = self.run_decoder_step(
                             &mut decoder_request,
                             inner_token as i64,
@@ -736,7 +769,25 @@ impl ParakeetEngine {
                         )?;
                         h_state = inner_h;
                         c_state = inner_c;
+
+                        let emit_time = t as isize;
                         t += inner_duration as usize;
+
+                        if emit_time == last_emission_t {
+                            emissions_at_t += 1;
+                        } else {
+                            last_emission_t = emit_time;
+                            emissions_at_t = 1;
+                        }
+
+                        if emissions_at_t >= MAX_SYMBOLS_PER_STEP {
+                            if t <= emit_time as usize {
+                                t = emit_time as usize + 1;
+                            }
+                            emissions_at_t = 0;
+                            last_emission_t = -1;
+                        }
+
                         break;
                     }
                 }
@@ -746,10 +797,31 @@ impl ParakeetEngine {
                 last_token = token as i64;
                 h_state = new_h;
                 c_state = new_c;
+                let emit_time = t as isize;
                 t += duration as usize;
+
+                // Track emissions at this time step
+                if emit_time == last_emission_t {
+                    emissions_at_t += 1;
+                } else {
+                    last_emission_t = emit_time;
+                    emissions_at_t = 1;
+                }
+
+                // Force-advance if too many emissions at same frame (maxSymbolsPerStep)
+                if emissions_at_t >= MAX_SYMBOLS_PER_STEP {
+                    if t <= emit_time as usize {
+                        t = emit_time as usize + 1;
+                    }
+                    emissions_at_t = 0;
+                    last_emission_t = -1;
+                }
             }
         }
 
+        if tokens.len() >= MAX_TOKENS_PER_CHUNK {
+            warn!("TDT decoding reached max tokens per chunk limit ({})", MAX_TOKENS_PER_CHUNK);
+        }
         if iterations >= max_iterations {
             warn!("TDT decoding reached max iterations limit");
         }
@@ -989,6 +1061,8 @@ impl ParakeetEngine {
             c_state: vec![0.0f32; DECODER_NUM_LAYERS * DECODER_HIDDEN_DIM],
             last_token: BLANK_TOKEN as i64,
             current_time: 0,
+            last_emission_time: -1,
+            emissions_at_time: 0,
         }];
 
         // If language is forced, condition all beams
@@ -1097,22 +1171,54 @@ impl ParakeetEngine {
                         c_state: beam.c_state.clone(),
                         last_token: beam.last_token,
                         current_time: beam.current_time,
+                        last_emission_time: beam.last_emission_time,
+                        emissions_at_time: beam.emissions_at_time,
                     };
 
                     if token == BLANK_TOKEN {
                         // Blank: advance time, keep states
-                        // CRITICAL: If duration=0 for blank, force to 1 to avoid infinite loop
                         let duration = if raw_duration == 0 { 1 } else { raw_duration };
                         new_beam.current_time += duration as usize;
                     } else {
-                        // Token emitted: update states and advance time
+                        // maxTokensPerChunk: skip expansion if beam already has too many tokens
+                        if new_beam.tokens.len() >= MAX_TOKENS_PER_CHUNK {
+                            continue;
+                        }
+
                         new_beam.tokens.push(token);
                         new_beam.last_token = token as i64;
                         new_beam.h_state = new_h.clone();
                         new_beam.c_state = new_c.clone();
-                        // For non-blank tokens, duration=0 means "don't advance time"
-                        // This allows multiple tokens at the same timestep
-                        new_beam.current_time += raw_duration as usize;
+
+                        // Protection: non-blank dur=0 at same frame as previous emission
+                        let duration = if raw_duration == 0
+                            && new_beam.current_time as isize == new_beam.last_emission_time
+                            && new_beam.emissions_at_time >= 1
+                        {
+                            1u32
+                        } else {
+                            raw_duration
+                        };
+
+                        let emit_time = new_beam.current_time as isize;
+                        new_beam.current_time += duration as usize;
+
+                        // Track emissions at this time step
+                        if emit_time == new_beam.last_emission_time {
+                            new_beam.emissions_at_time += 1;
+                        } else {
+                            new_beam.last_emission_time = emit_time;
+                            new_beam.emissions_at_time = 1;
+                        }
+
+                        // Force-advance if too many emissions at same frame
+                        if new_beam.emissions_at_time >= MAX_SYMBOLS_PER_STEP {
+                            if new_beam.current_time <= emit_time as usize {
+                                new_beam.current_time = emit_time as usize + 1;
+                            }
+                            new_beam.emissions_at_time = 0;
+                            new_beam.last_emission_time = -1;
+                        }
                     }
 
                     new_beams.push(new_beam);
@@ -1213,7 +1319,7 @@ impl ASREngine for ParakeetEngine {
     }
 
     fn run_inference(
-        &self,
+        &mut self,
         samples: &[f32],
         language: TranscriptionLanguage,
         config: &DecodingConfig,

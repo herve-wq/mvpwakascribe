@@ -62,3 +62,7 @@ path = "src/bin/test_full_pipeline.rs"
 [[bin]]
 name = "test_coreml"
 path = "src/bin/test_coreml.rs"
+
+[[bin]]
+name = "test_streaming_sim"
+path = "src/bin/test_streaming_sim.rs"

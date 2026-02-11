@@ -5,7 +5,7 @@ pub mod vad;
 
 pub use capture::AudioCapture;
 pub use chunker::{split_audio_smart, SmartChunkConfig};
-pub use processor::{duration_ms, load_audio_file, normalize_audio, resample_to_16k, write_wav};
+pub use processor::{calculate_rms, duration_ms, load_audio_file, normalize_audio, resample_to_16k, trim_trailing_silence, write_wav};
 
 use crate::error::Result;
 

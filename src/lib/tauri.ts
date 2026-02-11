@@ -41,6 +41,14 @@ export async function getAudioLevel(): Promise<number> {
   return invoke("get_audio_level");
 }
 
+// Streaming transcription (runs in background during recording)
+export async function startStreamingTranscription(
+  language?: TranscriptionLanguage,
+  decodingConfig?: DecodingConfig
+): Promise<void> {
+  return invoke("start_streaming_transcription", { language, decodingConfig });
+}
+
 // File transcription commands
 export async function transcribeFile(
   filePath: string,

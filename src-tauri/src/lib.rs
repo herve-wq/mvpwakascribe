@@ -1,19 +1,21 @@
-mod audio;
+pub mod audio;
 mod commands;
 pub mod engine;
-mod error;
+pub mod error;
 mod export;
 mod storage;
 
-use commands::{AudioState, EngineErrorState, EngineState, ModelPathState};
+use commands::{AudioState, EngineErrorState, EngineState, ModelPathState, StreamingDone, StreamingSegments, StreamingState};
 use parking_lot::Mutex;
 use std::path::PathBuf;
+use std::sync::atomic::AtomicBool;
+use std::sync::Arc;
 use std::fs::File;
 use tracing::{info, warn};
 use tracing_subscriber::{fmt, prelude::*, EnvFilter};
 
 /// Initialize OpenVINO library path for runtime linking
-fn init_openvino() -> bool {
+pub fn init_openvino() -> bool {
     #[cfg(target_os = "macos")]
     let (paths, lib_name, ld_var) = (
         vec![
@@ -343,6 +345,9 @@ pub fn run() {
         .manage(EngineState(Mutex::new(backend)))
         .manage(ModelPathState(model_base_path))
         .manage(EngineErrorState(Mutex::new(load_error)))
+        .manage(StreamingState(Arc::new(AtomicBool::new(false))))
+        .manage(StreamingDone(Arc::new(tokio::sync::Notify::new())))
+        .manage(StreamingSegments(Mutex::new(Vec::new())))
         .invoke_handler(tauri::generate_handler![
             // Audio commands
             commands::list_audio_devices,
@@ -353,6 +358,7 @@ pub fn run() {
             commands::resume_recording,
             commands::get_audio_level,
             // Transcription commands
+            commands::start_streaming_transcription,
             commands::transcribe_file,
             commands::get_transcription,
             // Engine commands

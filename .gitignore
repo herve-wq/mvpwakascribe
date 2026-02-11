@@ -31,3 +31,4 @@ src-tauri/target/
 
 # Cargo lock (optional, can be committed for apps)
 # src-tauri/Cargo.lock
+src-tauri/sidecar/parakeet-coreml/.build/

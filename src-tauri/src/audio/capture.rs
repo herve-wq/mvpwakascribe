@@ -20,6 +20,11 @@ enum AudioCommand {
     Stop {
         response: Sender<Result<Vec<f32>>>,
     },
+    /// Drain up to max_samples from the buffer without stopping the stream
+    DrainChunk {
+        max_samples: usize,
+        response: Sender<Result<Vec<f32>>>,
+    },
     Pause,
     Resume,
     Shutdown,
@@ -151,6 +156,26 @@ impl AudioCapture {
         Ok(())
     }
 
+    /// Drain up to `max_samples` from the capture buffer without stopping recording.
+    /// Returns the drained samples (may be empty if paused or buffer is small).
+    pub fn drain_chunk(&self, max_samples: usize) -> Result<Vec<f32>> {
+        if !self.is_recording.load(Ordering::SeqCst) {
+            return Ok(Vec::new());
+        }
+
+        let (response_tx, response_rx) = mpsc::channel();
+        self.command_tx
+            .send(AudioCommand::DrainChunk {
+                max_samples,
+                response: response_tx,
+            })
+            .map_err(|_| AppError::Audio("Audio thread not responding".into()))?;
+
+        response_rx
+            .recv()
+            .map_err(|_| AppError::Audio("Failed to get response from audio thread".into()))?
+    }
+
     pub fn get_audio_level(&self) -> f32 {
         *self.audio_level.lock()
     }
@@ -263,6 +288,13 @@ fn audio_thread(
                       samples.len(),
                       samples.len() as f32 / 16000.0);
                 let _ = response.send(Ok(samples));
+            }
+            Ok(AudioCommand::DrainChunk { max_samples, response }) => {
+                let mut buf = buffer.lock();
+                let count = max_samples.min(buf.len());
+                let drained: Vec<f32> = buf.drain(..count).collect();
+                debug!("DrainChunk: drained {} samples, {} remaining", drained.len(), buf.len());
+                let _ = response.send(Ok(drained));
             }
             Ok(AudioCommand::Pause) => {
                 if let Some(ref stream) = current_stream {

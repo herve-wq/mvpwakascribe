@@ -14,55 +14,19 @@ struct ErrorResult: Codable {
     let error: String
 }
 
-// MARK: - CLI Arguments
+// MARK: - Daemon request/response
 
-struct CLIArguments {
+struct TranscriptionRequest: Codable {
     let audioPath: String
-    var modelsPath: String? = nil
     var language: String = "auto"
     var beamWidth: Int = 1
     var temperature: Float = 1.0
     var blankPenalty: Float = 6.0
+    var command: String? = nil
+}
 
-    static func parse(_ args: [String]) -> CLIArguments? {
-        guard args.count >= 2 else { return nil }
-
-        var result = CLIArguments(audioPath: args[1])
-        var i = 2
-
-        while i < args.count {
-            switch args[i] {
-            case "--models":
-                if i + 1 < args.count {
-                    result.modelsPath = args[i + 1]
-                    i += 2
-                } else { i += 1 }
-            case "--language":
-                if i + 1 < args.count {
-                    result.language = args[i + 1]
-                    i += 2
-                } else { i += 1 }
-            case "--beam-width":
-                if i + 1 < args.count, let value = Int(args[i + 1]) {
-                    result.beamWidth = value
-                    i += 2
-                } else { i += 1 }
-            case "--temperature":
-                if i + 1 < args.count, let value = Float(args[i + 1]) {
-                    result.temperature = value
-                    i += 2
-                } else { i += 1 }
-            case "--blank-penalty":
-                if i + 1 < args.count, let value = Float(args[i + 1]) {
-                    result.blankPenalty = value
-                    i += 2
-                } else { i += 1 }
-            default:
-                i += 1
-            }
-        }
-        return result
-    }
+struct ReadyMessage: Codable {
+    let status: String
 }
 
 // MARK: - Helper functions
@@ -73,6 +37,7 @@ func printJSON<T: Encodable>(_ value: T) {
     if let data = try? encoder.encode(value),
        let json = String(data: data, encoding: .utf8) {
         print(json)
+        fflush(stdout)
     }
 }
 
@@ -85,55 +50,76 @@ func log(_ message: String) {
     FileHandle.standardError.write("[\(Date())] \(message)\n".data(using: .utf8)!)
 }
 
-// MARK: - Main (using FluidAudio)
+// MARK: - Main (persistent daemon mode)
 
 @main
 struct ParakeetCoreML {
     static func main() async {
-        let args = CommandLine.arguments
+        log("Starting persistent sidecar daemon")
 
-        guard let cliArgs = CLIArguments.parse(args) else {
-            exitWithError("Usage: parakeet-coreml <audio.wav> [--models <path>] [--language <auto|french|english>] [--beam-width <N>] [--temperature <F>] [--blank-penalty <F>]")
-        }
-
-        log("Audio: \(cliArgs.audioPath)")
-        log("Models: \(cliArgs.modelsPath ?? "FluidAudio default")")
-        log("Language: \(cliArgs.language)")
-        log("Using FluidAudio AsrManager")
-
-        guard FileManager.default.fileExists(atPath: cliArgs.audioPath) else {
-            exitWithError("Audio file not found: \(cliArgs.audioPath)")
-        }
-
-        let startTime = Date()
-
+        // Load models once at startup
         do {
-            // Load models using FluidAudio
             log("Loading ASR models via FluidAudio...")
             let models = try await AsrModels.downloadAndLoad(version: .v3)
 
-            // Initialize ASR manager with default config
             let asr = AsrManager(config: .default)
             try await asr.initialize(models: models)
-            log("ASR manager initialized")
+            log("ASR manager initialized, entering daemon loop")
 
-            // Transcribe directly from file URL
-            log("Transcribing...")
-            let audioURL = URL(fileURLWithPath: cliArgs.audioPath)
-            let result = try await asr.transcribe(audioURL, source: .system)
+            // Signal readiness
+            printJSON(ReadyMessage(status: "ready"))
 
-            let elapsed = Date().timeIntervalSince(startTime)
-            log("Transcription completed in \(Int(elapsed * 1000))ms: '\(result.text)'")
+            // Read requests from stdin, one JSON per line
+            while let line = readLine() {
+                let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !trimmed.isEmpty else { continue }
 
-            let output = TranscriptionResult(
-                text: result.text,
-                confidence: 0.95,  // FluidAudio doesn't expose confidence directly
-                processingTimeMs: Int(elapsed * 1000)
-            )
-            printJSON(output)
+                // Parse request
+                let decoder = JSONDecoder()
+                decoder.keyDecodingStrategy = .convertFromSnakeCase
+                guard let data = trimmed.data(using: .utf8),
+                      let request = try? decoder.decode(TranscriptionRequest.self, from: data) else {
+                    printJSON(ErrorResult(error: "Invalid JSON request"))
+                    continue
+                }
+
+                // Handle quit command
+                if request.command == "quit" {
+                    log("Received quit command")
+                    break
+                }
+
+                // Verify audio file exists
+                guard FileManager.default.fileExists(atPath: request.audioPath) else {
+                    printJSON(ErrorResult(error: "Audio file not found: \(request.audioPath)"))
+                    continue
+                }
+
+                // Transcribe
+                let startTime = Date()
+                do {
+                    log("Transcribing: \(request.audioPath) (lang=\(request.language))")
+                    let audioURL = URL(fileURLWithPath: request.audioPath)
+                    let result = try await asr.transcribe(audioURL, source: .system)
+
+                    let elapsed = Date().timeIntervalSince(startTime)
+                    log("Transcription completed in \(Int(elapsed * 1000))ms: '\(result.text)'")
+
+                    let output = TranscriptionResult(
+                        text: result.text,
+                        confidence: 0.95,
+                        processingTimeMs: Int(elapsed * 1000)
+                    )
+                    printJSON(output)
+                } catch {
+                    printJSON(ErrorResult(error: "Transcription failed: \(error.localizedDescription)"))
+                }
+            }
+
+            log("Daemon exiting")
 
         } catch {
-            exitWithError("Transcription failed: \(error.localizedDescription)")
+            exitWithError("Failed to initialize: \(error.localizedDescription)")
         }
     }
 }

@@ -1,0 +1,17 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(cargo check:*)",
+      "Bash(npm run tauri:build:*)",
+      "Bash(sqlite3:*)",
+      "Bash(npx tsc:*)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(git push:*)",
+      "Bash(swift build:*)",
+      "Bash(lipo:*)",
+      "Bash(du:*)",
+      "Bash(cargo build:*)"
+    ]
+  }
+}

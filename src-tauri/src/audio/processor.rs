@@ -127,6 +127,43 @@ pub fn calculate_rms(samples: &[f32]) -> f32 {
     (sum_sq / samples.len() as f64).sqrt() as f32
 }
 
+/// Trim trailing silence from an audio buffer (16kHz).
+/// Uses a **relative** threshold: a trailing window is considered silence if
+/// its RMS is below `silence_ratio` × overall buffer RMS.  This adapts
+/// automatically to the recording level (quiet mic vs loud mic).
+/// Returns the number of samples to keep (last active window + 150ms padding).
+/// Always keeps at least 1s to avoid degenerate inputs.
+pub fn trim_trailing_silence(samples: &[f32], silence_ratio: f32) -> usize {
+    const WINDOW: usize = 320; // 20ms at 16kHz
+    const PADDING: usize = 2400; // 150ms at 16kHz
+    const MIN_KEEP: usize = 16000; // 1s at 16kHz
+
+    if samples.len() <= MIN_KEEP {
+        return samples.len();
+    }
+
+    let overall_rms = calculate_rms(samples);
+    // If the whole buffer is near-silent, don't trim
+    if overall_rms < MIN_RMS_THRESHOLD {
+        return samples.len();
+    }
+    let threshold = overall_rms * silence_ratio;
+
+    let mut end = samples.len();
+    loop {
+        if end <= MIN_KEEP {
+            return MIN_KEEP;
+        }
+        let start = end.saturating_sub(WINDOW);
+        let rms = calculate_rms(&samples[start..end]);
+        if rms >= threshold {
+            // Found active audio — keep up to here + padding
+            return (end + PADDING).min(samples.len());
+        }
+        end = start;
+    }
+}
+
 /// Normalize audio to target RMS level
 /// Returns normalized samples and the gain applied
 pub fn normalize_audio(samples: &[f32]) -> (Vec<f32>, f32) {

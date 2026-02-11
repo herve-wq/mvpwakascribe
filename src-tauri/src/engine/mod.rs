@@ -29,36 +29,116 @@ static RE_MULTI_HALLUC: Lazy<Regex> = Lazy::new(|| {
     Regex::new(r"^(?:[\.\,\-\;\:\!\?]?\s*[A-Za-z0-9]{1,4}[\.\,\-\;\:]\s*)+").unwrap()
 });
 
-/// Filter out hallucinations at the start of chunk transcriptions
-/// These are typically short spurious words or punctuation that the model
-/// generates when starting from silence.
+/// Filter out hallucinations at the start and end of chunk transcriptions.
+/// Leading: spurious punctuation or short nonsense words from silence.
+/// Trailing: English sentences, short fragments after final punctuation, repetition loops.
 pub fn filter_chunk_hallucinations(text: &str) -> String {
     let text = text.trim();
     if text.is_empty() {
         return String::new();
     }
 
-    // Common hallucination patterns at chunk start:
-    // - Single punctuation marks (". ", ", ", "- ")
-    // - Very short nonsense words followed by punctuation ("Ture.", "MDF-", "CIS.")
-    // - Numbers alone at start ("260", "6.")
-
-    // Pattern: Remove leading garbage (punctuation, short gibberish words < 4 chars followed by punctuation)
+    // === Leading filters ===
     let cleaned = RE_LEADING_PUNCT.replace(text, "");
-
-    // Also remove short words (1-4 chars) at the very start if followed by punctuation
     let cleaned = RE_SHORT_WORD.replace(&cleaned, "");
-
-    // Handle multiple short hallucinations chained (". Ture. Règle" -> "Règle")
     let cleaned = RE_MULTI_HALLUC.replace(&cleaned, "");
+    let mut result = cleaned.trim().to_string();
 
-    let result = cleaned.trim().to_string();
+    // === Repetition filter (n-gram loop detection) ===
+    result = filter_repetitions(&result);
+
+    // === Trailing hallucination filter ===
+    result = filter_trailing_hallucinations(&result);
 
     if result != text {
         debug!("Filtered hallucination: '{}' -> '{}'", text, result);
     }
 
     result
+}
+
+/// Detect and truncate n-gram repetition loops.
+/// e.g. "de la fin de la fin de la fin de la fin" → "de la fin"
+fn filter_repetitions(text: &str) -> String {
+    let words: Vec<&str> = text.split_whitespace().collect();
+    if words.len() < 6 {
+        return text.to_string();
+    }
+
+    // Check n-grams of length 2..6 words
+    for n in 2..=6 {
+        if words.len() < n * 3 {
+            continue;
+        }
+        // Scan from the end backwards: find where a repeating pattern starts
+        // Check if the last 3*n words contain the same n-gram repeated 3+ times
+        for start in 0..words.len().saturating_sub(n * 3) {
+            let ngram = &words[start..start + n];
+            let mut repeats = 1;
+            let mut pos = start + n;
+            while pos + n <= words.len() {
+                if &words[pos..pos + n] == ngram {
+                    repeats += 1;
+                    pos += n;
+                } else {
+                    break;
+                }
+            }
+            if repeats >= 3 {
+                // Keep everything before the repetition + one instance of the n-gram
+                let keep_until = start + n;
+                let truncated = words[..keep_until].join(" ");
+                // Append whatever comes after the repetition block
+                let after_reps = start + n * repeats;
+                let suffix = if after_reps < words.len() {
+                    format!(" {}", words[after_reps..].join(" "))
+                } else {
+                    String::new()
+                };
+                let final_text = format!("{}{}", truncated, suffix);
+                debug!(
+                    "Repetition filter: '{}' repeated {}x, truncated",
+                    ngram.join(" "),
+                    repeats
+                );
+                // Recurse in case there are multiple repetition blocks
+                return filter_repetitions(&final_text);
+            }
+        }
+    }
+
+    text.to_string()
+}
+
+/// Remove trailing hallucination fragments after the last sentence.
+/// Language-agnostic: only removes very short residual fragments (< 15 chars)
+/// that appear after the last sentence-ending punctuation.
+/// e.g. "...en segments. Ye" → "...en segments."
+fn filter_trailing_hallucinations(text: &str) -> String {
+    let text = text.trim();
+    if text.is_empty() {
+        return String::new();
+    }
+
+    // Find the last sentence-ending punctuation (. ! ?)
+    let last_sentence_end = text.rfind(|c: char| c == '.' || c == '!' || c == '?');
+
+    if let Some(pos) = last_sentence_end {
+        let after = text[pos + 1..].trim();
+        // Only remove very short trailing fragments (< 15 chars, no sentence punct)
+        // Catches "Ye", "Yeah", "Ok", stray words — but not legitimate continuations
+        if !after.is_empty()
+            && after.len() < 15
+            && !after.contains('.')
+            && !after.contains('!')
+            && !after.contains('?')
+        {
+            debug!("Trailing fragment removed: '{}'", after);
+            return text[..=pos].trim().to_string();
+        }
+    }
+
+    text.to_string()
 }
 
 /// Maximum audio samples per chunk (15 seconds at 16kHz)
@@ -168,7 +248,7 @@ pub trait ASREngine: Send + Sync {
     /// # Returns
     /// Transcribed text
     fn run_inference(
-        &self,
+        &mut self,
         samples: &[f32],
         language: TranscriptionLanguage,
         config: &DecodingConfig,
@@ -234,9 +314,33 @@ impl DynamicEngine {
         Ok(())
     }
 
+    /// Transcribe a chunk of audio and return just the text.
+    /// Used for incremental streaming during recording.
+    pub fn transcribe_chunk(
+        &mut self,
+        samples: &[f32],
+        language: TranscriptionLanguage,
+        config: &DecodingConfig,
+    ) -> Result<String> {
+        if !self.is_loaded() {
+            return Ok(String::new());
+        }
+        let start = Instant::now();
+        let text = self.engine.run_inference(samples, language, config)?;
+        let elapsed = start.elapsed().as_millis();
+        info!(
+            "Chunk inference: {} samples ({:.1}s) -> {} chars in {}ms",
+            samples.len(),
+            samples.len() as f64 / 16000.0,
+            text.len(),
+            elapsed
+        );
+        Ok(text)
+    }
+
     /// Transcribe audio samples (16kHz mono f32)
     pub fn transcribe(
-        &self,
+        &mut self,
         samples: &[f32],
         source_type: &str,
         source_name: Option<String>,

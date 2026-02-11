@@ -8,6 +8,7 @@ import {
   pauseRecording as tauriPauseRecording,
   resumeRecording as tauriResumeRecording,
   getAudioLevel as tauriGetAudioLevel,
+  startStreamingTranscription,
 } from "../lib/tauri";
 import type { Segment, StreamingSegment } from "../lib/types";
 
@@ -30,19 +31,23 @@ export function useRecording() {
 
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const unlistenRefs = useRef<UnlistenFn[]>([]);
+  const elapsedMsRef = useRef(elapsedMs);
+  elapsedMsRef.current = elapsedMs;
 
-  // Set up event listeners for transcription segments
+  // Set up event listeners for transcription segments — mounted once
   useEffect(() => {
+    let cancelled = false;
+
     async function setupListeners() {
-      // Listen for streaming transcription segments
       const unlistenSegment = await listen<StreamingSegment>(
         "transcription-segment",
         (event) => {
+          if (cancelled) return;
           if (event.payload.isFinal) {
             const segment: Segment = {
               id: crypto.randomUUID(),
-              startMs: elapsedMs,
-              endMs: elapsedMs,
+              startMs: elapsedMsRef.current,
+              endMs: elapsedMsRef.current,
               text: event.payload.text,
               confidence: event.payload.confidence ?? 0.9,
             };
@@ -54,15 +59,21 @@ export function useRecording() {
         }
       );
 
-      unlistenRefs.current = [unlistenSegment];
+      if (cancelled) {
+        unlistenSegment();
+      } else {
+        unlistenRefs.current = [unlistenSegment];
+      }
     }
 
     setupListeners();
 
     return () => {
+      cancelled = true;
       unlistenRefs.current.forEach((unlisten) => unlisten());
     };
-  }, [elapsedMs, addSegment, setPendingText]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [addSegment, setPendingText]);
 
   // Poll audio level when recording
   const audioLevelRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -115,11 +126,17 @@ export function useRecording() {
       clearCurrentTranscription();
       await tauriStartRecording(selectedDeviceId ?? undefined);
       setRecordingState("recording");
+      // Fire-and-forget: streaming transcription runs in background
+      const language = settings.transcription.language;
+      const decodingConfig = getDecodingConfig(settings.transcription);
+      startStreamingTranscription(language, decodingConfig).catch((err) =>
+        console.warn("Streaming transcription error:", err)
+      );
     } catch (error) {
       console.error("Failed to start recording:", error);
       setRecordingState("idle");
     }
-  }, [selectedDeviceId, clearCurrentTranscription, setRecordingState]);
+  }, [selectedDeviceId, clearCurrentTranscription, setRecordingState, settings.transcription]);
 
   const stop = useCallback(async () => {
     try {
