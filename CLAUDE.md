@@ -4,6 +4,7 @@ Offline speech-to-text desktop application for macOS using NVIDIA Parakeet TDT m
 
 ## Core Rules
 
+- At the start of every new conversation, read all files in `docs/*.md` to load project context (session history, plans, TODOs).
 - When asked to plan, analyze, document, or review — do NOT write or modify code unless explicitly asked. Wait for explicit confirmation before implementing.
 - Always check which layer (TypeScript frontend or Rust backend) a change belongs to before editing.
 - When the user reports an error or bug, investigate the root cause deeply before proposing workarounds. Do not dismiss user-reported issues as user error or surface-level problems.
