@@ -89,11 +89,17 @@ impl CoreMLEngine {
 
         info!("Spawning persistent sidecar: {:?}", sidecar_path);
 
-        let mut child = Command::new(&sidecar_path)
-            .stdin(Stdio::piped())
+        let mut cmd = Command::new(&sidecar_path);
+        cmd.stdin(Stdio::piped())
             .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn()
+            .stderr(Stdio::piped());
+
+        // Pass model directory so the sidecar can load models locally without downloading
+        if let Some(model_dir) = &self.model_dir {
+            cmd.arg("--models").arg(model_dir);
+        }
+
+        let mut child = cmd.spawn()
             .map_err(|e| AppError::Transcription(format!("Failed to spawn sidecar: {}", e)))?;
 
         let stdin = child.stdin.take()

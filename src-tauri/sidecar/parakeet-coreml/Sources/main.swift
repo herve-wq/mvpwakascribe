@@ -50,6 +50,16 @@ func log(_ message: String) {
     FileHandle.standardError.write("[\(Date())] \(message)\n".data(using: .utf8)!)
 }
 
+// MARK: - CLI argument parsing
+
+func parseModelsPath() -> String? {
+    let args = CommandLine.arguments
+    if let idx = args.firstIndex(of: "--models"), idx + 1 < args.count {
+        return args[idx + 1]
+    }
+    return nil
+}
+
 // MARK: - Main (persistent daemon mode)
 
 @main
@@ -59,8 +69,24 @@ struct ParakeetCoreML {
 
         // Load models once at startup
         do {
-            log("Loading ASR models via FluidAudio...")
-            let models = try await AsrModels.downloadAndLoad(version: .v3)
+            let models: AsrModels
+
+            if let modelsPath = parseModelsPath() {
+                let repoDir = URL(fileURLWithPath: modelsPath)
+                    .appendingPathComponent("parakeet-tdt-0.6b-v3-coreml")
+                log("Loading ASR models from local path: \(repoDir.path)")
+
+                if AsrModels.modelsExist(at: repoDir, version: .v3) {
+                    log("Local models found, loading without download")
+                    models = try await AsrModels.load(from: repoDir, version: .v3)
+                } else {
+                    log("Local models not found at \(repoDir.path), falling back to download")
+                    models = try await AsrModels.downloadAndLoad(version: .v3)
+                }
+            } else {
+                log("No --models argument, downloading via FluidAudio...")
+                models = try await AsrModels.downloadAndLoad(version: .v3)
+            }
 
             let asr = AsrManager(config: .default)
             try await asr.initialize(models: models)
@@ -652,7 +678,13 @@ class TDTDecoder {
         let hiddenSize = encoderShape[1]
         let timeSteps = encoderShape[2]
 
-        while t < validLength && iterations < maxIterations {
+        // Anti-loop protections (aligned with parakeet.rs / FluidAudio TdtDecoderV3)
+        let maxSymbolsPerStep = 10
+        let maxTokensPerChunk = 150
+        var lastEmissionTime: Int = -1
+        var emissionsAtTime: Int = 0
+
+        while t < validLength && iterations < maxIterations && tokens.count < maxTokensPerChunk {
             iterations += 1
 
             // Extract encoder frame at time t
@@ -662,19 +694,47 @@ class TDTDecoder {
             let (decoderOutput, newH, newC) = try runDecoderStep(token: lastToken, hState: hState, cState: cState)
 
             // Run joint network
-            let (token, duration) = try runJoint(encoderFrame: encoderFrame, decoderOutput: decoderOutput)
+            var (token, duration) = try runJoint(encoderFrame: encoderFrame, decoderOutput: decoderOutput)
 
             if token == config.blankId {
-                // Blank token - advance time
-                t += max(1, duration)
+                // Blank token - advance time (dur>=1 guaranteed by decodeLogits)
+                t += duration
             } else {
+                // Protection: non-blank with dur=0 at same frame as previous emission → force dur=1
+                if duration == 0 && t == lastEmissionTime && emissionsAtTime >= 1 {
+                    duration = 1
+                }
+
                 // Emit token
                 tokens.append(token)
                 lastToken = token
                 hState = newH
                 cState = newC
-                t += max(1, duration)
+
+                let emitTime = t
+                t += duration
+
+                // Track emissions at this time step
+                if emitTime == lastEmissionTime {
+                    emissionsAtTime += 1
+                } else {
+                    lastEmissionTime = emitTime
+                    emissionsAtTime = 1
+                }
+
+                // Force-advance if too many emissions at same frame (maxSymbolsPerStep)
+                if emissionsAtTime >= maxSymbolsPerStep {
+                    if t <= emitTime {
+                        t = emitTime + 1
+                    }
+                    emissionsAtTime = 0
+                    lastEmissionTime = -1
+                }
             }
+        }
+
+        if tokens.count >= maxTokensPerChunk {
+            log("WARNING: TDT decoding reached max tokens per chunk limit (\(maxTokensPerChunk))")
         }
 
         return tokens
@@ -793,7 +853,13 @@ class TDTDecoder {
             }
         }
 
-        return (maxToken, maxDur + 1)
+        // Duration bin index IS the duration value (0-4)
+        // Protection: blank with dur=0 would stall — force dur=1
+        if maxToken == config.blankId && maxDur == 0 {
+            return (maxToken, 1)
+        }
+
+        return (maxToken, maxDur)
     }
 }
 
