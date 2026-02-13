@@ -1,17 +1,17 @@
+pub mod ai;
 pub mod audio;
-pub mod export;
-pub mod history;
+pub mod clipboard;
+pub mod debug;
+pub mod device;
+pub mod key_normalizer;
+pub mod keyring;
+pub mod license;
+pub mod logs;
+pub mod model;
+pub mod permissions;
+pub mod reset;
 pub mod settings;
-pub mod transcription;
-
-// Module de test - commenter cette ligne pour désactiver
-pub mod test_transcription;
-
-pub use audio::*;
-pub use export::*;
-pub use history::*;
-pub use settings::*;
-pub use transcription::*;
-
-// Export test - commenter cette ligne pour désactiver
-pub use test_transcription::*;
+pub mod stt;
+pub mod text;
+pub mod utils;
+pub mod window;

@@ -1,280 +1,121 @@
-# WakaScribe - Project Documentation
+# CLAUDE.md
 
-Offline speech-to-text desktop application for macOS using NVIDIA Parakeet TDT model.
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-## Core Rules
+## Project Overview
 
-- At the start of every new conversation, read all files in `docs/*.md` to load project context (session history, plans, TODOs).
-- When asked to plan, analyze, document, or review — do NOT write or modify code unless explicitly asked. Wait for explicit confirmation before implementing.
-- Always check which layer (TypeScript frontend or Rust backend) a change belongs to before editing.
-- When the user reports an error or bug, investigate the root cause deeply before proposing workarounds. Do not dismiss user-reported issues as user error or surface-level problems.
-- After making changes to build scripts, JSON config files (especially `tauri.conf.json`), or shell scripts, always validate them (e.g., `cargo build`, `jq . < tauri.conf.json`, `bash -n script.sh`) before considering the task done.
-- For git operations, always verify the current working directory is the actual git repository root (check for `.git` directory) before running git commands.
-- When creating session summaries or context documents for future sessions, save them to the `docs/` directory as markdown files. Include: current state, what was accomplished, known issues, and next steps.
+VoiceTypr is a native desktop app for macOS that provides offline voice transcription using Whisper. Built with Tauri v2 (Rust) and React with TypeScript.
 
-## Tech Stack
+### Key Features
+- 🎙️ **Voice Recording**: System-wide hotkey triggered recording
+- 🤖 **Offline Transcription**: Uses Whisper AI models locally
+- 📝 **Auto-insert**: Transcribed text automatically inserted at cursor
+- 🎯 **Model Management**: Download and switch between Whisper models
+- ⚡ **Native Performance**: Rust backend with React frontend
 
-- **Framework**: Tauri 2.x (Rust backend + React frontend)
-- **Frontend**: React 19 + TypeScript 5.8 + Tailwind CSS v4 + Zustand
-- **Backend**: Rust 2021 edition
-- **STT Engines**: OpenVINO (primary), ONNX Runtime, CoreML
-- **Database**: SQLite via rusqlite
-- **Audio**: cpal + rubato (resampling)
+## Development Guidelines
 
-## Prerequisites
+You are an expert AI programming assistant that primarily focuses on producing clear, readable TypeScript and Rust code for modern cross-platform desktop applications.
+
+You always use the latest versions of Tauri, Rust, React, and you are familiar with the latest features, best practices, and patterns associated with these technologies.
+
+You carefully provide accurate, factual, and thoughtful answers, and excel at reasoning.
+
+- Follow the user’s requirements carefully & to the letter.
+- Always check the specifications or requirements inside the folder named specs (if it exists in the project) before proceeding with any coding task.
+- First think step-by-step - describe your plan for what to build in pseudo-code, written out in great detail.
+- Confirm the approach with the user, then proceed to write code!
+- Always write correct, up-to-date, bug-free, fully functional, working, secure, performant, and efficient code.
+- Focus on readability over performance, unless otherwise specified.
+- Fully implement all requested functionality.
+- Leave NO todos, placeholders, or missing pieces in your code.
+- Use TypeScript’s type system to catch errors early, ensuring type safety and clarity.
+- Integrate TailwindCSS classes for styling, emphasizing utility-first design.
+- Utilize ShadCN-UI components effectively, adhering to best practices for component-driven architecture.
+- Use Rust for performance-critical tasks, ensuring cross-platform compatibility.
+- Ensure seamless integration between Tauri, Rust, and React for a smooth desktop experience.
+- Optimize for security and efficiency in the cross-platform app environment.
+- Be concise. Minimize any unnecessary prose in your explanations.
+- If there might not be a correct answer, state so. If you do not know the answer, admit it instead of guessing.
+- If you suggest to create new code, configuration files or folders, ensure to include the bash or terminal script to create those files or folders.
+
+## Development Commands
 
 ```bash
-# OpenVINO (required for primary inference backend)
-brew install openvino
+# Start development
+pnpm dev          # Frontend only (Vite dev server)
+pnpm tauri dev    # Full Tauri app development
+
+# Testing
+pnpm test         # Run all frontend tests
+pnpm test:watch   # Run tests in watch mode
+cd src-tauri && cargo test  # Run backend tests
+
+# Build production app
+pnpm tauri build  # Creates native .app bundle
+
+# Code quality
+pnpm lint         # Run ESLint
+pnpm typecheck    # Run TypeScript compiler
 ```
 
-## Build Commands
+## Architecture
 
-```bash
-npm run tauri:dev      # Development (frontend + backend)
-npm run tauri:build    # Production DMG
-npm run dev            # Frontend only
-cargo check            # Check Rust code
-```
+### Frontend (React + TypeScript)
+- **UI Components**: Pre-built shadcn/ui components in `src/components/ui/`
+- **Styling**: Tailwind CSS v4 with custom configuration
+- **State Management**: React hooks + Tauri events
+- **Error Handling**: React Error Boundaries for graceful failures
+- **Path Aliases**: `@/*` maps to `./src/*`
 
-Note: Scripts automatically set `OPENVINO_LIB_PATH=/usr/local/lib`.
+### Backend (Rust + Tauri)
+- **Source**: `src-tauri/src/`
+- **Modules**:
+  - `audio/`: Audio recording with CoreAudio
+  - `whisper/`: Whisper model management and transcription
+  - `commands/`: Tauri command handlers
+- **Capabilities**: Define permissions in `src-tauri/capabilities/`
 
-## Project Structure
+### Testing Philosophy
 
-```
-wakascribe/
-├── src/                          # React frontend
-│   ├── App.tsx                   # Main app, mode switching
-│   ├── index.css                 # Tailwind v4 theme
-│   ├── components/
-│   │   ├── Layout.tsx            # Main layout with sidebar
-│   │   ├── TitleBar.tsx          # Custom window titlebar
-│   │   ├── Recorder/             # Dictation mode
-│   │   │   ├── index.tsx
-│   │   │   ├── WaveformDisplay.tsx
-│   │   │   ├── RecordingControls.tsx
-│   │   │   └── ConfidenceIndicator.tsx
-│   │   ├── FileTranscribe/       # File transcription
-│   │   │   ├── index.tsx
-│   │   │   ├── DropZone.tsx
-│   │   │   └── ProgressBar.tsx
-│   │   ├── Editor/               # Transcription editor
-│   │   │   ├── index.tsx
-│   │   │   ├── SegmentList.tsx
-│   │   │   └── ExportMenu.tsx
-│   │   ├── History/              # History panel
-│   │   │   ├── index.tsx
-│   │   │   ├── SearchBar.tsx
-│   │   │   └── TranscriptionCard.tsx
-│   │   └── Settings/             # Settings panels
-│   │       ├── index.tsx
-│   │       ├── AppearanceSettings.tsx
-│   │       ├── AudioSettings.tsx
-│   │       ├── EngineSettings.tsx
-│   │       ├── TranscriptionSettings.tsx
-│   │       └── ShortcutSettings.tsx
-│   ├── hooks/
-│   │   ├── useRecording.ts       # Recording state/control
-│   │   ├── useTranscription.ts   # Transcription operations
-│   │   ├── useAudioDevices.ts    # Device enumeration
-│   │   ├── useSettings.ts        # Settings management
-│   │   └── useTheme.ts           # Theme switching
-│   ├── stores/
-│   │   └── appStore.ts           # Zustand global state
-│   └── lib/
-│       ├── types.ts              # TypeScript types
-│       └── tauri.ts              # Tauri command wrappers
-│
-├── src-tauri/                    # Rust backend
-│   ├── src/
-│   │   ├── lib.rs                # Entry, plugin setup, engine init
-│   │   ├── main.rs               # Binary entry
-│   │   ├── error.rs              # AppError enum
-│   │   ├── commands/
-│   │   │   ├── mod.rs
-│   │   │   ├── audio.rs          # Audio device/recording
-│   │   │   ├── transcription.rs  # Transcription commands
-│   │   │   ├── history.rs        # History CRUD
-│   │   │   ├── settings.rs       # Settings persistence
-│   │   │   ├── export.rs         # TXT/DOCX export
-│   │   │   └── test_transcription.rs
-│   │   ├── audio/
-│   │   │   ├── mod.rs
-│   │   │   ├── capture.rs        # Live capture (cpal, threaded)
-│   │   │   ├── processor.rs      # Resampling, normalization
-│   │   │   ├── chunker.rs        # Audio chunking
-│   │   │   └── vad.rs            # Voice Activity Detection
-│   │   ├── engine/
-│   │   │   ├── mod.rs            # DynamicEngine trait
-│   │   │   ├── parakeet.rs       # OpenVINO backend
-│   │   │   ├── onnxruntime.rs    # ONNX Runtime backend
-│   │   │   ├── coreml.rs         # CoreML backend (macOS)
-│   │   │   ├── config.rs         # DecodingConfig
-│   │   │   ├── mel.rs            # Mel spectrogram
-│   │   │   ├── decoder.rs        # TDT beam search decoder
-│   │   │   └── merger.rs         # Segment merging
-│   │   ├── storage/
-│   │   │   ├── mod.rs
-│   │   │   ├── database.rs       # DB init/connection
-│   │   │   ├── models.rs         # Data models
-│   │   │   └── queries.rs        # CRUD operations
-│   │   └── export/
-│   │       ├── mod.rs
-│   │       ├── txt.rs
-│   │       └── docx.rs
-│   ├── migrations/
-│   │   └── 001_init.sql          # DB schema
-│   ├── Cargo.toml
-│   └── tauri.conf.json
-│
-├── model/                        # ML models by backend
-│   ├── openvino/
-│   │   ├── parakeet_encoder.xml/bin
-│   │   ├── parakeet_decoder.xml/bin
-│   │   ├── parakeet_joint.xml/bin
-│   │   ├── parakeet_melspectogram.xml/bin
-│   │   └── parakeet_v3_vocab.json
-│   ├── onnxruntime/
-│   │   ├── encoder-model.int8.onnx
-│   │   ├── decoder_joint-model.onnx
-│   │   ├── nemo128.onnx
-│   │   ├── vocab.txt
-│   │   └── config.json
-│   └── coreml/
-│       ├── Encoder.mlmodelc/
-│       ├── Decoder.mlmodelc/
-│       ├── Preprocessor.mlmodelc/
-│       ├── MelEncoder.mlmodelc/
-│       └── parakeet_v3_vocab.json
-│
-├── package.json
-├── vite.config.ts
-├── tsconfig.json
-└── postcss.config.js
-```
+#### Backend Testing
+- Comprehensive unit tests for all business logic
+- Test edge cases and error conditions
+- Focus on correctness and reliability
 
-## Tauri Commands
+#### Frontend Testing
+- **User-focused**: Test what users see and do, not implementation details
+- **Integration over unit**: Test complete user journeys
+- **Key test files**:
+  - `App.critical.test.tsx`: Critical user paths
+  - `App.user.test.tsx`: Common user scenarios
+  - Component tests: Only for complex behavior
 
-**Audio:**
-- `list_audio_devices`, `start_recording`, `stop_recording`
-- `pause_recording`, `resume_recording`, `get_audio_level`
+### Current Project Status
 
-**Transcription:**
-- `transcribe_file`, `get_transcription`
+✅ **Completed**:
+- Core recording and transcription functionality
+- Model download and management (Whisper + Parakeet)
+- **NEW**: Swift/FluidAudio Parakeet sidecar (1.2MB vs 123MB Python)
+- Settings persistence
+- Comprehensive test suite (110+ tests)
+- Error boundaries and recovery
+- Global hotkey support
 
-**History:**
-- `list_transcriptions`, `delete_transcription`, `update_transcription_text`
+📝 **Recent Updates**:
+- Parakeet Swift integration complete (see `PARAKEET_SWIFT_INTEGRATION.md`)
+- Native Apple Neural Engine support for **macOS only** (see `PARAKEET_MACOS_ONLY_FIX.md`)
+- Automated sidecar build via `build.rs`
+- Parakeet V2 removed, only V3 available
+- Dynamic engine detection (whisper/parakeet)
 
-**Settings:**
-- `get_settings`, `update_settings`
-- `switch_engine_backend`, `get_engine_backend`
+### Common Patterns
 
-**Export:**
-- `export_to_txt`, `export_to_docx`, `copy_to_clipboard`
+1. **Error Handling**: Always wrap risky operations in try-catch
+2. **Loading States**: Show clear feedback during async operations
+3. **Graceful Degradation**: App should work even if some features fail
+4. **Type Safety**: Use TypeScript strictly, avoid `any`
 
-## Database Schema
-
-SQLite at `~/Library/Application Support/com.wakascribe.app/wakascribe.db`
-
-```sql
--- Transcriptions table
-CREATE TABLE transcriptions (
-  id TEXT PRIMARY KEY,
-  created_at TEXT, updated_at TEXT,
-  source_type TEXT,  -- 'dictation' | 'file'
-  source_name TEXT,
-  duration_ms INTEGER,
-  language TEXT,
-  raw_text TEXT, edited_text TEXT, is_edited INTEGER
-);
-
--- Segments table
-CREATE TABLE segments (
-  id TEXT PRIMARY KEY,
-  transcription_id TEXT,
-  start_ms INTEGER, end_ms INTEGER,
-  text TEXT, confidence REAL
-);
-
--- Settings table
-CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT);
-```
-
-## Audio Processing Pipeline
-
-1. Capture from device (cpal) → 2. Resample to 16kHz (rubato)
-3. Normalize → 4. Mel spectrogram (128 features, 160 hop)
-5. Inference (OpenVINO/ONNX/CoreML) → 6. Beam search decode
-7. Post-process → 8. Store in SQLite → 9. Stream to frontend
-
-## Model Configuration
-
-- **Features**: 128 mel spectral features
-- **Sample rate**: 16kHz
-- **Vocabulary**: 8193 tokens + blank
-- **Max duration**: 15 seconds (240,000 samples)
-
-## Language Support
-
-- Auto-detection (default)
-- Force French: token 71 `<|fr|>`
-- Force English: token 64 `<|en|>`
-
-## Decoding Parameters
-
-- `beam_width`: 1 (greedy) to 5+ (quality)
-- `temperature`: 0.1-1.5
-- `blank_penalty`: 0-15
-
-## Zustand State
-
-```typescript
-{
-  recordingState: 'idle' | 'recording' | 'paused' | 'processing',
-  currentMode: 'dictation' | 'file',
-  currentSegments: Segment[],
-  settings: Settings,
-  transcriptions: Transcription[],
-  audioDevices: AudioDevice[],
-  audioLevel: number
-}
-```
-
-## Key Types
-
-```typescript
-interface Transcription {
-  id: string;
-  created_at: string;
-  source_type: 'dictation' | 'file';
-  source_name: string;
-  duration_ms: number;
-  language: TranscriptionLanguage;
-  segments: Segment[];
-  raw_text: string;
-  edited_text?: string;
-}
-
-interface Segment {
-  id: string;
-  start_ms: number;
-  end_ms: number;
-  text: string;
-  confidence: number;
-}
-
-type EngineBackend = 'openvino' | 'onnxruntime' | 'coreml';
-type TranscriptionLanguage = 'auto' | 'french' | 'english';
-```
-
-## App Identifier
-
-`com.wakascribe.desktop` (bundle) / `com.wakascribe.app` (storage)
-
-## Tailwind CSS v4
-
-Config in `src/index.css` with `@theme` variables. Must exclude binary dirs:
-```css
-@source not "../model";
-@source not "../src-tauri";
-```
+IMPORTANT: Read `agent-docs` for more details on the project before making any changes.
+IMPORTANT: Read `agent-reports` to understand whats going on
+IMPORTANT: Read `CLAUDE.local.md` for any local changes.

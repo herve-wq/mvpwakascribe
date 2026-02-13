@@ -1,204 +1,125 @@
-import { useCallback, useEffect, useRef } from "react";
-import { listen, UnlistenFn } from "@tauri-apps/api/event";
-import { useAppStore } from "../stores/appStore";
-import { getDecodingConfig } from "../lib/config";
-import {
-  startRecording as tauriStartRecording,
-  stopRecording as tauriStopRecording,
-  pauseRecording as tauriPauseRecording,
-  resumeRecording as tauriResumeRecording,
-  getAudioLevel as tauriGetAudioLevel,
-  startStreamingTranscription,
-} from "../lib/tauri";
-import type { Segment, StreamingSegment } from "../lib/types";
+import { invoke } from '@tauri-apps/api/core';
+import { listen } from '@tauri-apps/api/event';
+import { useCallback, useEffect, useState } from 'react';
+import { updateService } from '@/services/updateService';
 
-export function useRecording() {
-  const {
-    recordingState,
-    selectedDeviceId,
-    elapsedMs,
-    currentSegments,
-    pendingText,
-    settings,
-    setRecordingState,
-    setElapsedMs,
-    addSegment,
-    setPendingText,
-    setAudioLevel,
-    clearCurrentTranscription,
-    addTranscription,
-  } = useAppStore();
+type RecordingState = 'idle' | 'starting' | 'recording' | 'stopping' | 'transcribing' | 'error';
 
-  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const unlistenRefs = useRef<UnlistenFn[]>([]);
-  const elapsedMsRef = useRef(elapsedMs);
-  elapsedMsRef.current = elapsedMs;
+interface UseRecordingReturn {
+  state: RecordingState;
+  error: string | null;
+  startRecording: () => Promise<void>;
+  stopRecording: () => Promise<void>;
+  isActive: boolean;
+}
 
-  // Set up event listeners for transcription segments — mounted once
+export function useRecording(): UseRecordingReturn {
+  const [state, setState] = useState<RecordingState>('idle');
+  const [error, setError] = useState<string | null>(null);
+
+  // Check initial state on mount by requesting current state
   useEffect(() => {
-    let cancelled = false;
-
-    async function setupListeners() {
-      const unlistenSegment = await listen<StreamingSegment>(
-        "transcription-segment",
-        (event) => {
-          if (cancelled) return;
-          if (event.payload.isFinal) {
-            const segment: Segment = {
-              id: crypto.randomUUID(),
-              startMs: elapsedMsRef.current,
-              endMs: elapsedMsRef.current,
-              text: event.payload.text,
-              confidence: event.payload.confidence ?? 0.9,
-            };
-            addSegment(segment);
-            setPendingText("");
-          } else {
-            setPendingText(event.payload.text);
-          }
+    const checkInitialState = async () => {
+      try {
+        const currentState = await invoke<{ state: RecordingState; error: string | null }>('get_current_recording_state');
+        if (!currentState || typeof currentState.state !== 'string') {
+          return;
         }
-      );
-
-      if (cancelled) {
-        unlistenSegment();
-      } else {
-        unlistenRefs.current = [unlistenSegment];
+        console.log('[Recording Hook] Initial state:', currentState);
+        setState(currentState.state);
+        setError(currentState.error);
+      } catch (err) {
+        console.error('[Recording Hook] Failed to get initial state:', err);
       }
-    }
+    };
+    checkInitialState();
+  }, []);
+
+  // Listen to backend events - frontend is purely reactive
+  useEffect(() => {
+    const unsubscribers: Array<() => void> = [];
+
+    const setupListeners = async () => {
+      // Backend state changes
+      unsubscribers.push(await listen('recording-state-changed', (event: any) => {
+        console.log('[Recording Hook] State changed:', event.payload);
+        setState(event.payload.state);
+        setError(event.payload.error || null);
+      }));
+
+      // Legacy events for compatibility
+      unsubscribers.push(await listen('recording-started', () => {
+        console.log('[Recording Hook] Recording started');
+        setState('recording');
+        setError(null);
+      }));
+
+      unsubscribers.push(await listen('recording-timeout', () => {
+        console.log('[Recording Hook] Recording timeout');
+        setState('stopping');
+      }));
+
+      unsubscribers.push(await listen('recording-stopped-silence', () => {
+        console.log('[Recording Hook] Recording stopped due to silence');
+        // You could show a toast or notification here
+        // For now, just log it
+      }));
+
+      unsubscribers.push(await listen('transcription-started', () => {
+        console.log('[Recording Hook] Transcription started');
+        setState('transcribing');
+      }));
+
+      // NOTE: We don't listen to transcription-complete here anymore
+      // The state will be set to idle by recording-state-changed event
+      // after the pill finishes processing and calls transcription_processed
+      
+      // NOTE: Error events (transcription-error, recording-error) are handled
+      // via pill_toast() in the backend and shown in FeedbackToast window.
+      // State errors come through recording-state-changed event.
+    };
 
     setupListeners();
 
     return () => {
-      cancelled = true;
-      unlistenRefs.current.forEach((unlisten) => unlisten());
+      unsubscribers.forEach(unsub => unsub());
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [addSegment, setPendingText]);
+  }, []);
 
-  // Poll audio level when recording
-  const audioLevelRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
+  // Sync session state with update service to prevent auto-updates during recording
+  // Note: Only react to actual state changes from backend, not component lifecycle
   useEffect(() => {
-    if (recordingState === "recording") {
-      audioLevelRef.current = setInterval(async () => {
-        try {
-          const level = await tauriGetAudioLevel();
-          setAudioLevel(level);
-        } catch (e) {
-          console.error("Failed to get audio level:", e);
-        }
-      }, 50); // Poll every 50ms for smooth visualization
-    } else {
-      if (audioLevelRef.current) {
-        clearInterval(audioLevelRef.current);
-        audioLevelRef.current = null;
-      }
-      setAudioLevel(0);
-    }
+    const isActive = state !== 'idle' && state !== 'error';
+    updateService.setSessionActive(isActive);
+  }, [state]);
 
-    return () => {
-      if (audioLevelRef.current) {
-        clearInterval(audioLevelRef.current);
-      }
-    };
-  }, [recordingState, setAudioLevel]);
-
-  // Timer for elapsed time
-  useEffect(() => {
-    if (recordingState === "recording") {
-      timerRef.current = setInterval(() => {
-        setElapsedMs(elapsedMs + 100);
-      }, 100);
-    } else if (timerRef.current) {
-      clearInterval(timerRef.current);
-      timerRef.current = null;
-    }
-
-    return () => {
-      if (timerRef.current) {
-        clearInterval(timerRef.current);
-      }
-    };
-  }, [recordingState, elapsedMs, setElapsedMs]);
-
-  const start = useCallback(async () => {
+  // Simple command invocations - let backend handle all state management
+  const startRecording = useCallback(async () => {
     try {
-      clearCurrentTranscription();
-      await tauriStartRecording(selectedDeviceId ?? undefined);
-      setRecordingState("recording");
-      // Fire-and-forget: streaming transcription runs in background
-      const language = settings.transcription.language;
-      const decodingConfig = getDecodingConfig(settings.transcription);
-      startStreamingTranscription(language, decodingConfig).catch((err) =>
-        console.warn("Streaming transcription error:", err)
-      );
-    } catch (error) {
-      console.error("Failed to start recording:", error);
-      setRecordingState("idle");
+      console.log('[Recording Hook] Invoking start_recording...');
+      await invoke('start_recording');
+    } catch (err) {
+      console.error('[Recording Hook] Failed to start recording:', err);
+      // Backend will emit appropriate error events
     }
-  }, [selectedDeviceId, clearCurrentTranscription, setRecordingState, settings.transcription]);
+  }, []);
 
-  const stop = useCallback(async () => {
+  const stopRecording = useCallback(async () => {
     try {
-      setRecordingState("processing");
-      // Use global settings for language and decoding config
-      const language = settings.transcription.language;
-      const decodingConfig = getDecodingConfig(settings.transcription);
-      const transcription = await tauriStopRecording(language, decodingConfig);
-      addTranscription(transcription);
-      setRecordingState("idle");
-      return transcription;
-    } catch (error) {
-      console.error("Failed to stop recording:", error);
-      setRecordingState("idle");
-      return null;
+      console.log('[Recording Hook] Invoking stop_recording...');
+      await invoke('stop_recording');
+    } catch (err) {
+      console.error('[Recording Hook] Failed to stop recording:', err);
+      // Backend will emit appropriate error events
     }
-  }, [setRecordingState, addTranscription, settings.transcription]);
-
-  const pause = useCallback(async () => {
-    try {
-      await tauriPauseRecording();
-      setRecordingState("paused");
-    } catch (error) {
-      console.error("Failed to pause recording:", error);
-    }
-  }, [setRecordingState]);
-
-  const resume = useCallback(async () => {
-    try {
-      await tauriResumeRecording();
-      setRecordingState("recording");
-    } catch (error) {
-      console.error("Failed to resume recording:", error);
-    }
-  }, [setRecordingState]);
-
-  const toggleRecording = useCallback(async () => {
-    if (recordingState === "idle") {
-      await start();
-    } else if (recordingState === "recording" || recordingState === "paused") {
-      await stop();
-    }
-  }, [recordingState, start, stop]);
-
-  const togglePause = useCallback(async () => {
-    if (recordingState === "recording") {
-      await pause();
-    } else if (recordingState === "paused") {
-      await resume();
-    }
-  }, [recordingState, pause, resume]);
+  }, []);
 
   return {
-    recordingState,
-    elapsedMs,
-    segments: currentSegments,
-    pendingText,
-    start,
-    stop,
-    pause,
-    resume,
-    toggleRecording,
-    togglePause,
+    state,
+    error,
+    startRecording,
+    stopRecording,
+    isActive: state !== 'idle' && state !== 'error'
   };
 }

@@ -3,6 +3,10 @@
 <plist version="1.0">
 <dict>
     <key>NSMicrophoneUsageDescription</key>
-    <string>WakaScribe needs access to your microphone for speech-to-text transcription.</string>
+    <string>VoiceType needs access to your microphone to transcribe speech to text.</string>
+    <key>NSSpeechRecognitionUsageDescription</key>
+    <string>VoiceType uses speech recognition to convert your voice to text.</string>
+    <key>NSAppleEventsUsageDescription</key>
+    <string>VoiceType needs accessibility permissions to insert transcribed text at your cursor position.</string>
 </dict>
 </plist>
